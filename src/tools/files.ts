@@ -4,29 +4,17 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { MantisClient } from '../client.js';
 import type { MantisFile } from '../types.js';
-import { getVersionHint } from '../version-hint.js';
 
 function errorText(msg: string): string {
-  const vh = getVersionHint();
-  vh?.triggerLatestVersionFetch();
-  const hint = vh?.getUpdateHint();
-  return hint ? `Error: ${msg}\n\n${hint}` : `Error: ${msg}`;
+  return `Error: ${msg}`;
 }
 
 export function registerFileTools(
   server: McpServer,
   client: MantisClient,
   uploadDir?: string,
-  transport: 'stdio' | 'http' = 'stdio',
 ): void {
   const normalizedUploadDir = uploadDir ? resolve(uploadDir) + sep : undefined;
-  // file_path reads from the server's own filesystem. Over stdio the caller is
-  // the trusted local agent (same machine, same user), so any path is fine. Over
-  // HTTP a remote client neither controls nor should reach server-local paths —
-  // it must send Base64 via `content`. Only allow file_path in HTTP mode when an
-  // explicit MANTIS_UPLOAD_DIR sandboxes it.
-  const filePathAllowed = transport === 'stdio' || normalizedUploadDir !== undefined;
-
   // ---------------------------------------------------------------------------
   // list_issue_files
   // ---------------------------------------------------------------------------
@@ -34,12 +22,10 @@ export function registerFileTools(
   server.registerTool(
     'list_issue_files',
     {
-      title: 'List Issue File Attachments',
-      description: `List all file attachments of a MantisBT issue. Returns an array of attachment objects, each containing id, filename, size in bytes, content_type, and download_url. Returns an empty array if the issue has no attachments.
-
-Use this tool when you need to inspect or enumerate files attached to an issue. To add a new attachment, use upload_file instead. To retrieve full issue details that include attachments alongside other fields, use get_issue instead.`,
+      title: "列出缺陷附件",
+      description: "列出缺陷附件，返回 id、filename、size、content_type、download_url 等元数据；无附件时返回空数组。上传使用 upload_file，完整详情使用 get_issue。",
       inputSchema: z.object({
-        issue_id: z.coerce.number().int().positive().describe('Numeric issue ID'),
+        issue_id: z.coerce.number().int().positive().describe("缺陷编号（数字）"),
       }),
       annotations: {
         readOnlyHint: true,
@@ -68,23 +54,15 @@ Use this tool when you need to inspect or enumerate files attached to an issue. 
   server.registerTool(
     'upload_file',
     {
-      title: 'Upload File Attachment',
-      description: `Upload a file as an attachment to a MantisBT issue. Adds the file to the issue without modifying any issue fields or status. Returns the created attachment metadata on success.
-
-Provide exactly one of the two input modes:
-- file_path (preferred): absolute path to a local file — use this whenever the file exists on disk; the server reads and encodes it automatically; filename is derived from the path. Note: file_path reads from the server's filesystem and is disabled over the HTTP transport unless MANTIS_UPLOAD_DIR is configured — HTTP clients should use content instead.
-- content: Base64-encoded file content — only use this when the file is not accessible via a path (e.g. in-memory data); filename must be supplied explicitly via the filename parameter
-
-The optional content_type sets the MIME type (e.g. "image/png"); defaults to "application/octet-stream". Use the optional description to annotate the attachment.
-
-Use this tool to attach files such as logs, screenshots, or patches to an existing issue. To list existing attachments, use list_issue_files. To retrieve issue details, use get_issue.`,
+      title: "上传附件",
+      description: "为已有缺陷上传附件，不修改缺陷字段或状态，成功后返回附件元数据。\n\nfile_path 与 content 必须二选一：优先传本地文件绝对路径 file_path，服务端读取并编码，默认从路径提取文件名；无法通过路径访问时传 Base64 content，并填写 filename。配置 MANTIS_UPLOAD_DIR 后，本地路径必须位于该目录内。\n\ncontent_type 默认 application/octet-stream，可设为 image/png 等；description 为可选说明。查看已有附件使用 list_issue_files。",
       inputSchema: z.object({
-        issue_id: z.coerce.number().int().positive().describe('Numeric issue ID'),
-        file_path: z.string().min(1).optional().describe('Preferred: absolute path to the local file to upload — use this whenever the file exists on disk (mutually exclusive with content)'),
-        content: z.string().min(1).optional().describe('Fallback: Base64-encoded file content — only use when file_path is not available (mutually exclusive with file_path)'),
-        filename: z.string().min(1).optional().describe('File name for the attachment (required when using content; overrides the derived name when using file_path)'),
-        content_type: z.string().optional().describe('MIME type of the file, e.g. "image/png" (default: "application/octet-stream")'),
-        description: z.string().optional().describe('Optional description for the attachment'),
+        issue_id: z.coerce.number().int().positive().describe("缺陷编号（数字）"),
+        file_path: z.string().min(1).optional().describe("优先使用：待上传本地文件的绝对路径，与 content 互斥"),
+        content: z.string().min(1).optional().describe("备用方式：Base64 编码的文件内容，仅在无法使用 file_path 时使用，与 file_path 互斥"),
+        filename: z.string().min(1).optional().describe("附件文件名：使用 content 时必填；使用 file_path 时可覆盖从路径提取的文件名"),
+        content_type: z.string().optional().describe("文件 MIME 类型，例如 image/png；默认 application/octet-stream"),
+        description: z.string().optional().describe("可选的附件说明"),
       }),
       annotations: {
         readOnlyHint: false,
@@ -105,9 +83,6 @@ Use this tool to attach files such as logs, screenshots, or patches to an existi
         let fileName: string;
 
         if (file_path) {
-          if (!filePathAllowed) {
-            return { content: [{ type: 'text', text: errorText('file_path is disabled over the HTTP transport. Send the file via the "content" parameter (Base64), or set MANTIS_UPLOAD_DIR to permit server-local paths within that directory.') }], isError: true };
-          }
           if (normalizedUploadDir) {
             const normalizedPath = resolve(file_path);
             if (!normalizedPath.startsWith(normalizedUploadDir)) {

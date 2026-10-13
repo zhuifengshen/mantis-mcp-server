@@ -78,32 +78,6 @@ describe('MantisClient – URL building', () => {
     });
   });
 
-  it('uses /api/rest/index.php/<path> when index.php routing is enabled', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(makeResponse(200, '{}'));
-    vi.stubGlobal('fetch', fetchMock);
-
-    const client = new MantisClient('https://mantis.example.com', 'token123', true);
-    await client.get('issues/42');
-
-    const calledUrl: string = fetchMock.mock.calls[0][0] as string;
-    expect(calledUrl).toBe('https://mantis.example.com/api/rest/index.php/issues/42');
-  });
-
-  it('normalizes an /api/rest/index.php suffix when index.php routing is enabled', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(makeResponse(200, '{}'));
-    vi.stubGlobal('fetch', fetchMock);
-
-    const client = new MantisClient(
-      'https://mantis.example.com/api/rest/index.php/',
-      'token123',
-      true,
-    );
-    await client.get('issues');
-
-    const calledUrl: string = fetchMock.mock.calls[0][0] as string;
-    expect(calledUrl).toBe('https://mantis.example.com/api/rest/index.php/issues');
-  });
-
   it('normalizes an /API/REST suffix regardless of case', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeResponse(200, '{}'));
     vi.stubGlobal('fetch', fetchMock);
@@ -113,19 +87,6 @@ describe('MantisClient – URL building', () => {
 
     const calledUrl: string = fetchMock.mock.calls[0][0] as string;
     expect(calledUrl).toBe('https://mantis.example.com/api/rest/issues');
-  });
-
-  it('accepts a responseObserver alongside the index.php flag', async () => {
-    const observer = vi.fn();
-    const fetchMock = vi.fn().mockResolvedValue(makeResponse(200, '{}'));
-    vi.stubGlobal('fetch', fetchMock);
-
-    const client = new MantisClient('https://mantis.example.com', 'token123', true, observer);
-    await client.get('issues');
-
-    const calledUrl: string = fetchMock.mock.calls[0][0] as string;
-    expect(calledUrl).toBe('https://mantis.example.com/api/rest/index.php/issues');
-    expect(observer).toHaveBeenCalledOnce();
   });
 
   it('appends defined query parameters', () => {
@@ -316,21 +277,6 @@ describe('MantisClient – credential factory', () => {
     expect((options.headers as Record<string, string>)['Authorization']).toBe('lazy-key');
   });
 
-  it('uses index.php routing returned by the credential factory', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(makeResponse(200, '{}'));
-    vi.stubGlobal('fetch', fetchMock);
-
-    const client = new MantisClient(async () => ({
-      baseUrl: 'https://lazy.example.com',
-      apiKey: 'lazy-key',
-      useIndexPhp: true,
-    }));
-    await client.get('issues');
-
-    const calledUrl: string = fetchMock.mock.calls[0][0] as string;
-    expect(calledUrl).toBe('https://lazy.example.com/api/rest/index.php/issues');
-  });
-
   it('caches credentials after the first call and does not call the factory again', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeResponse(200, '{}'));
     vi.stubGlobal('fetch', fetchMock);
@@ -347,54 +293,6 @@ describe('MantisClient – credential factory', () => {
     expect(factory).toHaveBeenCalledOnce();
   });
 
-  it('forwards the responseObserver when using factory constructor', async () => {
-    const observer = vi.fn();
-    const fakeResponse = makeResponse(200, '{}');
-    const fetchMock = vi.fn().mockResolvedValue(fakeResponse);
-    vi.stubGlobal('fetch', fetchMock);
-
-    const factory = vi.fn().mockResolvedValue({
-      baseUrl: 'https://lazy.example.com',
-      apiKey: 'lazy-key',
-    });
-
-    const client = new MantisClient(factory, observer);
-    await client.get('issues');
-
-    expect(observer).toHaveBeenCalledOnce();
-    expect(observer).toHaveBeenCalledWith(fakeResponse);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// responseObserver
-// ---------------------------------------------------------------------------
-
-describe('MantisClient – responseObserver', () => {
-  it('calls responseObserver on successful response', () => {
-    const observer = vi.fn();
-    const fakeResponse = makeResponse(200, '{}');
-    const fetchMock = vi.fn().mockResolvedValue(fakeResponse);
-    vi.stubGlobal('fetch', fetchMock);
-
-    const client = new MantisClient('https://mantis.example.com', 'token', observer);
-    return client.get('issues').then(() => {
-      expect(observer).toHaveBeenCalledOnce();
-      expect(observer).toHaveBeenCalledWith(fakeResponse);
-    });
-  });
-
-  it('does not call responseObserver on error response', async () => {
-    const observer = vi.fn();
-    const fetchMock = vi.fn().mockResolvedValue(
-      makeResponse(500, JSON.stringify({ message: 'Internal Server Error' })),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
-    const client = new MantisClient('https://mantis.example.com', 'token', observer);
-    await expect(client.get('issues')).rejects.toBeInstanceOf(MantisApiError);
-    expect(observer).not.toHaveBeenCalled();
-  });
 });
 
 // ---------------------------------------------------------------------------

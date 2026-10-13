@@ -1,39 +1,12 @@
+import { createHash, createHmac } from 'node:crypto';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Recognises a MANTIS_BASE_URL that already points at the REST API, with or
- * without the index.php front controller. Single source of truth for both
- * stripping the suffix and detecting the entry point, so the two can never
- * disagree. Case-insensitive: MantisBT is commonly hosted on case-insensitive
- * servers, which is exactly the IIS/Apache-without-rewrite crowd this matters
- * for.
- */
-const REST_API_SUFFIX = /\/api\/rest(\/index\.php)?\/?$/i;
-
-/**
- * Normalise a MANTIS_BASE_URL so that it never ends with "/api/rest",
- * "/api/rest/index.php", or a trailing slash. The client appends the REST API
- * prefix itself, so URLs that already include it must not produce a doubled
- * prefix.
- *
- * The "/index.php" part is stripped regardless of the useIndexPhp flag — this
- * function only produces the bare host prefix. Whether requests then route
- * through index.php is answered by usesIndexPhpEntryPoint() on the
- * *unnormalised* URL.
- */
+/** 统一基地址，REST 请求固定使用 /api/rest/。 */
 export function normalizeBaseUrl(url: string): string {
-  return url.replace(REST_API_SUFFIX, '').replace(/\/$/, '');
-}
-
-/**
- * True when an unnormalised base URL already routes through the index.php
- * front controller. Used by the config layer to default MANTIS_USE_INDEX_PHP
- * for users who paste their full REST URL.
- */
-export function usesIndexPhpEntryPoint(url: string): boolean {
-  return REST_API_SUFFIX.exec(url)?.[1] !== undefined;
+  return url.replace(/\/api\/rest\/?$/i, '').replace(/\/$/, '');
 }
 
 export function buildIssueViewUrl(baseUrl: string, issueId: number): string {
@@ -62,38 +35,47 @@ export class MantisApiError extends Error {
 // MantisClient
 // ---------------------------------------------------------------------------
 
-type ResponseObserver = (response: Response) => void;
-type Credentials = { baseUrl: string; apiKey: string; useIndexPhp?: boolean };
-type ResolvedCredentials = { baseUrl: string; apiKey: string; useIndexPhp: boolean };
+type Credentials = { baseUrl: string; apiKey: string };
 type CredentialFactory = () => Promise<Credentials>;
+
+export interface RequestOptions {
+  params?: Record<string, string | number | boolean | undefined>;
+  ifMatch?: string;
+  timeoutMs?: number;
+}
+
+export interface RestResponse<T> {
+  status: number;
+  headers: { etag: string | null; mantisVersion: string | null };
+  body: T;
+  requestSent: true;
+}
+
+/** 不保留响应正文或请求体，防止上传错误泄露 Base64 和凭据。 */
+export class RestError extends Error {
+  constructor(public readonly status: number | null, public readonly requestSent: boolean,
+    public readonly definiteRejection: boolean, public readonly method?: string) {
+    super(status === null ? 'Mantis 请求未取得可靠响应' : `Mantis 请求返回 HTTP ${status}`);
+  }
+}
 
 export class MantisClient {
   private readonly credentialFactory?: CredentialFactory;
-  private readonly responseObserver?: ResponseObserver;
-  private resolvedCredentials?: ResolvedCredentials;
+  private resolvedCredentials?: Credentials;
 
-  constructor(baseUrl: string, apiKey: string, responseObserver?: ResponseObserver);
-  constructor(baseUrl: string, apiKey: string, useIndexPhp: boolean, responseObserver?: ResponseObserver);
-  constructor(credentialFactory: CredentialFactory, responseObserver?: ResponseObserver);
+  constructor(baseUrl: string, apiKey: string);
+  constructor(credentialFactory: CredentialFactory);
   constructor(
     baseUrlOrFactory: string | CredentialFactory,
-    apiKeyOrObserver?: string | ResponseObserver,
-    useIndexPhpOrObserver?: boolean | ResponseObserver,
-    responseObserver?: ResponseObserver,
+    apiKey?: string,
   ) {
     if (typeof baseUrlOrFactory === 'string') {
-      const useIndexPhp = typeof useIndexPhpOrObserver === 'boolean' ? useIndexPhpOrObserver : false;
       this.resolvedCredentials = {
         baseUrl: normalizeBaseUrl(baseUrlOrFactory),
-        apiKey: apiKeyOrObserver as string,
-        useIndexPhp,
+        apiKey: apiKey!,
       };
-      this.responseObserver = typeof useIndexPhpOrObserver === 'function'
-        ? useIndexPhpOrObserver
-        : responseObserver;
     } else {
       this.credentialFactory = baseUrlOrFactory;
-      this.responseObserver = apiKeyOrObserver as ResponseObserver | undefined;
     }
   }
 
@@ -101,10 +83,10 @@ export class MantisClient {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private async getCredentials(): Promise<ResolvedCredentials> {
+  private async getCredentials(): Promise<Credentials> {
     if (!this.resolvedCredentials) {
-      const { baseUrl, apiKey, useIndexPhp = false } = await this.credentialFactory!();
-      this.resolvedCredentials = { baseUrl: normalizeBaseUrl(baseUrl), apiKey, useIndexPhp };
+      const { baseUrl, apiKey } = await this.credentialFactory!();
+      this.resolvedCredentials = { baseUrl: normalizeBaseUrl(baseUrl), apiKey };
     }
     return this.resolvedCredentials;
   }
@@ -113,10 +95,50 @@ export class MantisClient {
     return (await this.getCredentials()).baseUrl;
   }
 
+  /** 仅供本地命名空间和不透明标识使用，不返回原始凭据。 */
+  async getCredentialDomain(): Promise<{ instance: string; credential: string; key: Buffer }> {
+    const { baseUrl, apiKey } = await this.getCredentials();
+    return {
+      instance: createHash('sha256').update(baseUrl).digest('hex'),
+      credential: createHmac('sha256', apiKey).update(`mantis-workflow-scope:${baseUrl}`).digest('hex'),
+      key: createHmac('sha256', apiKey).update(`mantis-workflow-token-v1:${baseUrl}`).digest(),
+    };
+  }
+
+  /** 工作流专用元信息入口；所有写入只发送一次，未知结果交由执行账本核查。 */
+  async request<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string,
+    body?: unknown, options: RequestOptions = {}): Promise<RestResponse<T>> {
+    let url: string;
+    let headers: Record<string, string>;
+    let encoded: string | undefined;
+    try {
+      url = await this.buildUrl(path, options.params);
+      headers = await this.headers();
+      if (options.ifMatch) headers['If-Match'] = options.ifMatch;
+      encoded = body === undefined ? undefined : JSON.stringify(body);
+    } catch { throw new RestError(null, false, true, method); }
+    let response: Response;
+    try {
+      response = await fetch(url, { method, headers, body: encoded,
+        signal: AbortSignal.timeout(options.timeoutMs ?? MantisClient.TIMEOUT_MS), redirect: 'error' });
+    } catch { throw new RestError(null, true, false, method); }
+    if (!response.ok) {
+      // 这些 REST 入口的输入、身份和权限拒绝；5xx 一律不假定尚未执行。
+      const rejectedBeforeWrite = [401, 403, 404, 412, 413, 415].includes(response.status)
+        || response.status === 400 && method === 'POST' && /^projects\/\d+\/versions$/.test(path);
+      throw new RestError(response.status, true, rejectedBeforeWrite, method);
+    }
+    try {
+      const raw = response.status === 204 ? '' : await response.text();
+      return { status: response.status, requestSent: true,
+        headers: { etag: response.headers.get('ETag'), mantisVersion: response.headers.get('X-Mantis-Version') },
+        body: (raw ? JSON.parse(raw) : undefined) as T };
+    } catch { throw new RestError(response.status, true, false, method); }
+  }
+
   private async buildUrl(path: string, params?: Record<string, string | number | boolean | undefined>): Promise<string> {
-    const { baseUrl, useIndexPhp } = await this.getCredentials();
-    const restPrefix = useIndexPhp ? '/api/rest/index.php/' : '/api/rest/';
-    const url = new URL(`${baseUrl}${restPrefix}${path}`);
+    const { baseUrl } = await this.getCredentials();
+    const url = new URL(`${baseUrl}/api/rest/${path}`);
     if (params) {
       for (const [key, value] of Object.entries(params)) {
         if (value !== undefined) {
@@ -138,7 +160,6 @@ export class MantisClient {
 
   private async handleResponse<T>(response: Response): Promise<T> {
     if (response.ok) {
-      this.responseObserver?.(response);
       // Some DELETE endpoints return 204 No Content
       if (response.status === 204) {
         return undefined as T;

@@ -1,14 +1,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { MantisClient } from '../client.js';
-import { RELATIONSHIP_TYPES, RELATIONSHIP_NAME_TO_ID } from '../constants.js';
-import { getVersionHint } from '../version-hint.js';
+import { RELATIONSHIP_NAME_TO_ID } from '../constants.js';
 
 function errorText(msg: string): string {
-  const vh = getVersionHint();
-  vh?.triggerLatestVersionFetch();
-  const hint = vh?.getUpdateHint();
-  return hint ? `Error: ${msg}\n\n${hint}` : `Error: ${msg}`;
+  return `Error: ${msg}`;
 }
 
 export function registerRelationshipTools(server: McpServer, client: MantisClient): void {
@@ -17,31 +13,19 @@ export function registerRelationshipTools(server: McpServer, client: MantisClien
   // add_relationship
   // ---------------------------------------------------------------------------
 
-
   server.registerTool(
     'add_relationship',
     {
-      title: 'Add Issue Relationship',
-      description: `Add a relationship between two MantisBT issues.
-
-Relationship types — use either type_id (numeric) or type_name (string):
-- ${RELATIONSHIP_TYPES.DUPLICATE_OF} / "duplicate_of"  — this issue is a duplicate of target
-- ${RELATIONSHIP_TYPES.RELATED_TO}   / "related_to"    — this issue is related to target
-- ${RELATIONSHIP_TYPES.PARENT_OF}    / "parent_of"     — this issue depends on target (target must be done first); alias: "depends_on"
-- ${RELATIONSHIP_TYPES.CHILD_OF}     / "child_of"      — this issue blocks target (target can't proceed until this is done); alias: "blocks"
-- ${RELATIONSHIP_TYPES.HAS_DUPLICATE} / "has_duplicate" — this issue has target as a duplicate
-
-Directionality note: "A child_of B" means A blocks B. "A parent_of B" means A depends on B.
-
-Dash variants (e.g. "related-to") are also accepted for type_name.`,
+      title: "添加缺陷关联",
+      description: '在两条缺陷间建立关联。type_id 与 type_name 二选一。类型：0=duplicate_of（重复于），1=related_to（相关），2=parent_of / depends_on（源缺陷依赖目标缺陷），3=child_of / blocks（源缺陷阻塞目标缺陷），4=has_duplicate（目标缺陷重复于源缺陷）。',
       inputSchema: z.object({
-        issue_id: z.coerce.number().int().positive().describe('The source issue ID (the one the relationship is added to)'),
-        target_id: z.coerce.number().int().positive().describe('The target issue ID'),
+        issue_id: z.coerce.number().int().positive().describe("源缺陷编号，关联会添加到该缺陷"),
+        target_id: z.coerce.number().int().positive().describe("目标缺陷编号"),
         type_id: z.coerce.number().int().min(0).max(4).optional().describe(
-          'Relationship type ID: 0=duplicate_of, 1=related_to, 2=parent_of (depends on), 3=child_of (blocks), 4=has_duplicate. Use either type_id or type_name.'
+          "关联类型编号：0=duplicate_of，1=related_to，2=parent_of（依赖），3=child_of（阻塞），4=has_duplicate；与 type_name 二选一"
         ),
         type_name: z.string().optional().describe(
-          'Relationship type name as alternative to type_id. Accepted: "duplicate_of", "related_to", "parent_of" (or "depends_on"), "child_of" (or "blocks"), "has_duplicate". Dash variants (e.g. "related-to") also work.'
+          "关联类型名称：duplicate_of、related_to、parent_of（别名 depends_on）、child_of（别名 blocks）、has_duplicate；也接受 related-to 等短横线形式"
         ),
       }),
       annotations: {
@@ -90,13 +74,11 @@ Dash variants (e.g. "related-to") are also accepted for type_name.`,
   server.registerTool(
     'remove_relationship',
     {
-      title: 'Remove Issue Relationship',
-      description: `Remove a relationship from a MantisBT issue.
-
-Use get_issue first to retrieve the relationship IDs. The relationship_id is the numeric id field of a relationship object in the issue's relationships array (not the type ID).`,
+      title: "移除缺陷关联",
+      description: "移除缺陷关联。先用 get_issue 读取 relationships，relationship_id 使用关联记录的 id，不是关联类型编号。",
       inputSchema: z.object({
-        issue_id: z.coerce.number().int().positive().describe('The issue ID the relationship belongs to'),
-        relationship_id: z.coerce.number().int().positive().describe('The numeric ID of the relationship to remove (from the relationships array in get_issue)'),
+        issue_id: z.coerce.number().int().positive().describe("关联所属的缺陷编号"),
+        relationship_id: z.coerce.number().int().positive().describe("待移除关联的记录编号，来自 get_issue 的 relationships 数组，不是关联类型编号"),
       }),
       annotations: {
         readOnlyHint: false,

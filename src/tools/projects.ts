@@ -2,16 +2,12 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { MantisClient } from '../client.js';
 import type { MantisProject, MantisUser, MantisVersion, MantisCategory } from '../types.js';
-import { getVersionHint } from '../version-hint.js';
 import { ALL_PROJECTS_PREFIX } from '../constants.js';
 import { normalizeProject } from './metadata.js';
 import { MetadataCache } from '../cache.js';
 
 function errorText(msg: string): string {
-  const vh = getVersionHint();
-  vh?.triggerLatestVersionFetch();
-  const hint = vh?.getUpdateHint();
-  return hint ? `Error: ${msg}\n\n${hint}` : `Error: ${msg}`;
+  return `Error: ${msg}`;
 }
 
 const coerceBool = (val: unknown) =>
@@ -26,8 +22,8 @@ export function registerProjectTools(server: McpServer, client: MantisClient, ca
   server.registerTool(
     'list_projects',
     {
-      title: 'List Projects',
-      description: 'List all MantisBT projects accessible to the current API user.',
+      title: "列出项目",
+      description: "列出当前 API 用户可以访问的所有 Mantis 项目。",
       inputSchema: z.object({}),
       annotations: {
         readOnlyHint: true,
@@ -56,17 +52,11 @@ export function registerProjectTools(server: McpServer, client: MantisClient, ca
   server.registerTool(
     'get_project_users',
     {
-      title: 'Get Project Users',
-      description: `List all users with access to a specific MantisBT project. Returns an array of user objects, each containing id, name (login name), real_name, email, and access_level fields.
-
-Use get_project_users when you need the complete user list for a project — for example, to verify who has access or to build a handler list. For name-based lookup of a single user, prefer find_project_member which supports case-insensitive substring search and is significantly faster on large projects.
-
-Access level IDs: 10=viewer, 25=reporter, 40=updater, 55=developer, 70=manager, 90=administrator.
-
-Prerequisites: obtain project_id from list_projects.`,
+      title: "读取项目成员",
+      description: "列出项目成员，包含 id、name（登录名）、real_name、email、access_level 等字段。按名称查找少量用户时优先用 find_project_member。访问级别：10=查看者、25=报告人、40=更新者、55=开发者、70=管理者、90=管理员。project_id 来自 list_projects。",
       inputSchema: z.object({
-        project_id: z.coerce.number().int().positive().describe('Numeric project ID — use list_projects to discover project IDs'),
-        access_level: z.coerce.number().int().optional().describe('Return only users at or above this access level. Common values: 10=viewer, 25=reporter, 40=updater, 55=developer, 70=manager, 90=administrator. Omit to return all users.'),
+        project_id: z.coerce.number().int().positive().describe("项目编号，使用 list_projects 查询"),
+        access_level: z.coerce.number().int().optional().describe("仅返回达到该访问级别的用户：10=查看者、25=报告人、40=更新者、55=开发者、70=管理者、90=管理员；省略时返回全部"),
       }),
       annotations: {
         readOnlyHint: true,
@@ -96,18 +86,12 @@ Prerequisites: obtain project_id from list_projects.`,
   server.registerTool(
     'get_project_versions',
     {
-      title: 'Get Project Versions',
-      description: `List all versions defined for a MantisBT project. Returns an array of version objects, each containing id, name, released (boolean), obsolete (boolean), and optionally a date field.
-
-Use the returned version names directly when creating or updating issues via create_issue and update_issue (version, target_version, fixed_in_version fields).
-
-By default, obsolete and inherited parent-project versions are excluded. Set obsolete=true to include deprecated versions; set inherit=true to also return versions from parent projects.
-
-Prerequisites: obtain project_id from list_projects.`,
+      title: "读取项目版本",
+      description: "列出项目版本，包括 id、name、released、obsolete 和 timestamp（版本日期）。返回的名称可用于 create_issue 或 update_issue 的 version、target_version、fixed_in_version。默认排除废弃版本和父项目继承版本；obsolete=true、inherit=true 分别启用。project_id 来自 list_projects。创建、修改、发布或删除版本分别使用 create_version、update_version、release_version、delete_version。",
       inputSchema: z.object({
-        project_id: z.coerce.number().int().positive().describe('Numeric project ID — use list_projects to discover project IDs'),
-        obsolete: z.preprocess(coerceBool, z.boolean()).default(false).describe('Include obsolete (deprecated) versions in the response. Default: false. Set to true to see all versions including those no longer actively used.'),
-        inherit: z.preprocess(coerceBool, z.boolean()).default(false).describe('Include versions inherited from parent projects. Default: false. Set to true for sub-projects that share versions with a parent project.'),
+        project_id: z.coerce.number().int().positive().describe("项目编号，使用 list_projects 查询"),
+        obsolete: z.preprocess(coerceBool, z.boolean().default(false)).describe("是否包含已废弃版本，默认 false"),
+        inherit: z.preprocess(coerceBool, z.boolean().default(false)).describe("是否包含从父项目继承的版本，默认 false"),
       }),
       annotations: {
         readOnlyHint: true,
@@ -138,13 +122,10 @@ Prerequisites: obtain project_id from list_projects.`,
   server.registerTool(
     'get_project_categories',
     {
-      title: 'Get Project Categories',
-      description: `List all categories available for a MantisBT project.
-
-Note: The MantisBT API returns global (cross-project) categories with a "[All Projects] " prefix.
-This tool strips that prefix so the returned names can be used directly when creating issues.`,
+      title: "读取项目分类",
+      description: "列出项目可用分类。返回时去除跨项目分类名称的 [All Projects] 前缀，方便直接用于创建缺陷。",
       inputSchema: z.object({
-        project_id: z.coerce.number().int().positive().describe('Numeric project ID'),
+        project_id: z.coerce.number().int().positive().describe("项目编号（数字）"),
       }),
       annotations: {
         readOnlyHint: true,
@@ -179,16 +160,12 @@ This tool strips that prefix so the returned names can be used directly when cre
   server.registerTool(
     'find_project_member',
     {
-      title: 'Find Project Member',
-      description: `Search for users with access to a MantisBT project by name, display name, or email.
-
-Returns up to \`limit\` matching users (default: 10, max: 100). Matching is case-insensitive substring search across \`name\`, \`real_name\`, and \`email\` fields. Omit \`query\` to list the first \`limit\` users.
-
-Data is served from the local metadata cache when fresh; falls back to a live API call otherwise.`,
+      title: "查找项目成员",
+      description: "按登录名 name、显示名 real_name 或 email 查找项目成员，使用不区分大小写的子字符串匹配。limit 默认 10，最大 100；省略 query 时返回前 limit 个用户。优先读取有效缓存，否则调用实时接口。",
       inputSchema: z.object({
-        project_id: z.coerce.number().int().positive().describe('Numeric project ID'),
-        query: z.string().optional().describe('Case-insensitive substring to match against name, real_name, or email'),
-        limit: z.coerce.number().int().min(1).max(100).default(10).describe('Maximum number of results to return (default: 10, max: 100)'),
+        project_id: z.coerce.number().int().positive().describe("项目编号（数字）"),
+        query: z.string().optional().describe("匹配 name、real_name 或 email 的子字符串，不区分大小写"),
+        limit: z.coerce.number().int().min(1).max(100).default(10).describe("最多返回条数，默认 10，最大 100"),
       }),
       annotations: {
         readOnlyHint: true,

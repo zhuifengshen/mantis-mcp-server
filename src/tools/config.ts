@@ -3,17 +3,13 @@ import { z } from 'zod';
 import { MantisClient } from '../client.js';
 import { MetadataCache } from '../cache.js';
 import { ISSUE_ENUM_OPTIONS, MANTIS_CANONICAL_ENUM_NAMES } from '../constants.js';
-import { getVersionHint } from '../version-hint.js';
 import type { MantisEnumEntry } from '../types.js';
 
 // MantisBT config API: enum values may be a pre-parsed array (2.x) or legacy "id:name,..." string
 type EnumEntry = { id: number; name: string; label?: string };
 
 function errorText(msg: string): string {
-  const vh = getVersionHint();
-  vh?.triggerLatestVersionFetch();
-  const hint = vh?.getUpdateHint();
-  return hint ? `Error: ${msg}\n\n${hint}` : `Error: ${msg}`;
+  return `Error: ${msg}`;
 }
 
 // Parse a MantisBT enum string ("10:feature,20:trivial,...") into {id, name}[]
@@ -108,19 +104,10 @@ export function registerConfigTools(server: McpServer, client: MantisClient, cac
   server.registerTool(
     'get_config',
     {
-      title: 'Get MantisBT Configuration',
-      description: `Retrieve one or more MantisBT configuration options.
-
-Common option names:
-- "status_enum_string" — issue status values and their IDs
-- "priority_enum_string" — priority values
-- "severity_enum_string" — severity values
-- "resolution_enum_string" — resolution values
-- "reproducibility_enum_string" — reproducibility values
-- "view_state_enum_string" — view state values
-- "access_levels_enum_string" — access level values`,
+      title: "读取 Mantis 配置",
+      description: "读取一个或多个 Mantis 配置项。常用名称：status_enum_string（状态）、priority_enum_string（优先级）、severity_enum_string（严重程度）、resolution_enum_string（解决结果）、reproducibility_enum_string（复现频率）、view_state_enum_string（可见性）、access_levels_enum_string（访问级别）。",
       inputSchema: z.object({
-        options: z.array(z.string()).min(1).describe('Array of configuration option names to retrieve'),
+        options: z.array(z.string()).min(1).describe("需要读取的配置项名称数组"),
       }),
       annotations: {
         readOnlyHint: true,
@@ -152,46 +139,8 @@ Common option names:
   server.registerTool(
     'get_issue_enums',
     {
-      title: 'Get Issue Enum Values',
-      description: `Return valid ID, name, and (if available) localized label for all issue enum fields.
-
-Use this tool before creating or updating issues to look up the correct value
-for severity, status, priority, resolution, or reproducibility.
-
-Example response (English installation):
-{
-  "severity":         [{"id": 10, "name": "feature"}, {"id": 50, "name": "minor"}, ...],
-  "status":           [{"id": 10, "name": "new"}, {"id": 20, "name": "feedback"}, ...],
-  "priority":         [{"id": 10, "name": "none"}, {"id": 30, "name": "normal"}, ...],
-  "resolution":       [{"id": 10, "name": "open"}, {"id": 20, "name": "fixed"}, ...],
-  "reproducibility":  [{"id": 10, "name": "always"}, {"id": 70, "name": "have not tried"}, ...]
-}
-
-Example response (localized installation, e.g. German):
-{
-  "status": [
-    {"id": 10, "name": "new",      "label": "Neu"},
-    {"id": 20, "name": "feedback", "label": "Feedback"},
-    {"id": 30, "name": "acknowledged", "label": "Bestätigt"},
-    ...
-  ],
-  ...
-}
-
-Fields:
-- "id"             — numeric ID accepted by the API
-- "name"           — localized or canonical name from the MantisBT database
-- "label"          — UI display label (only present when it differs from "name")
-- "canonical_name" — English canonical name (only present on localized installs)
-
-For create_issue (severity, priority, reproducibility): pass the canonical English name, the
-localized "name", or the "label" — all are accepted. The server resolves them to the correct ID.
-
-For update_issue: pass either "id" or "name" in the field reference object.
-
-Note: on some installations enum values are customized at the database level. In that case "name"
-itself may be localized (e.g. "kleinerer Fehler" instead of "minor") and no "label" will be present
-because there is no separate English original.`,
+      title: "读取缺陷枚举",
+      description: "返回缺陷枚举字段的有效值，包括 severity、status、priority、resolution、reproducibility。创建或更新前先查询有效值。\n\nid 是 API 使用的编号，name 是标准名称或实例本地化名称，label 是界面标签（与 name 不同时提供），canonical_name 是标准英文名（本地化名称不同时提供）。例如状态可返回 {\"id\":80,\"name\":\"resolved\",\"label\":\"已解决\"}。\n\ncreate_issue 的 severity、priority、reproducibility 接受标准英文名、本地化 name 或 label；服务端会解析为编号。update_issue 的字段引用使用 {id} 或 {name}。自定义枚举以当前实例返回值为准。",
       inputSchema: z.object({}),
       annotations: {
         readOnlyHint: true,
@@ -219,8 +168,8 @@ because there is no separate English original.`,
   server.registerTool(
     'list_languages',
     {
-      title: 'List Supported Languages',
-      description: 'List all languages supported by the MantisBT installation.',
+      title: "列出支持的语言",
+      description: "列出当前 Mantis 实例支持的语言。",
       inputSchema: z.object({}),
       annotations: {
         readOnlyHint: true,
@@ -248,15 +197,11 @@ because there is no separate English original.`,
   server.registerTool(
     'list_tags',
     {
-      title: 'List Tags',
-      description: `List all tags defined in the MantisBT installation.
-
-The MantisBT REST API exposes a GET /tags endpoint on some installations.
-If that endpoint is not available, this tool falls back to the local metadata
-cache populated by sync_metadata.`,
+      title: "列出标签",
+      description: "列出 Mantis 标签。优先读取 GET /tags；接口不存在时使用 sync_metadata 填充的本地元数据缓存。",
       inputSchema: z.object({
-        page: z.coerce.number().int().positive().default(1).describe('Page number (default: 1)'),
-        page_size: z.coerce.number().int().min(1).max(200).default(50).describe('Tags per page (default: 50)'),
+        page: z.coerce.number().int().positive().default(1).describe("页码，默认 1"),
+        page_size: z.coerce.number().int().min(1).max(200).default(50).describe("每页标签数，默认 50"),
       }),
       annotations: {
         readOnlyHint: true,

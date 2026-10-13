@@ -3,17 +3,13 @@ import { z } from 'zod';
 import { MantisClient, buildIssueViewUrl, buildNoteViewUrl } from '../client.js';
 import { MetadataCache } from '../cache.js';
 import type { MantisIssue, MantisUser, MantisPaginatedIssues } from '../types.js';
-import { getVersionHint } from '../version-hint.js';
 import { MANTIS_CANONICAL_ENUM_NAMES, MANTIS_RESOLVED_STATUS_ID, resolveEnumId } from '../constants.js';
 import { dateFilterSchema, matchesDateFilter, hasDateFilter, type DateFilter } from '../date-filter.js';
 import { fetchIssueEnumsWithCache } from './config.js';
 import { postNote } from './notes.js';
 
 function errorText(msg: string): string {
-  const vh = getVersionHint();
-  vh?.triggerLatestVersionFetch();
-  const hint = vh?.getUpdateHint();
-  return hint ? `Error: ${msg}\n\n${hint}` : `Error: ${msg}`;
+  return `Error: ${msg}`;
 }
 
 // issueId: fallback when a select projection excluded the id field from the response
@@ -36,8 +32,11 @@ const ref = z.object({ id: z.number().optional(), name: z.string().optional() })
 
 // Custom field entry in MantisBT REST format: { field: {id|name}, value: "<string>" }
 const customFieldEntry = z.object({
-  field: ref.describe('Custom field reference: { id } or { name }'),
-  value: z.coerce.string().describe('Field value as string'),
+  field: ref.describe("自定义字段引用：{ id } 或 { name }"),
+  value: z.preprocess(
+    value => value === undefined ? undefined : String(value),
+    z.string(),
+  ).describe("字段值必须提供；数字会转为字符串，空字符串用于清空字段"),
 });
 
 const GET_ISSUES_CONCURRENCY = 5;
@@ -98,11 +97,11 @@ export function registerIssueTools(server: McpServer, client: MantisClient, cach
   server.registerTool(
     'get_issue',
     {
-      title: 'Get Issue',
-      description: 'Retrieve a single MantisBT issue by its numeric ID. Returns all issue fields including notes, attachments, and relationships (unless "select" is given). Notes are always included — no separate list_notes call needed.',
+      title: "读取缺陷详情",
+      description: "按编号读取单条缺陷。默认包含备注、附件和关联等完整字段；传入 select 时仅返回选定字段。需要备注时将 notes 加入 select，或省略 select。",
       inputSchema: z.object({
-        id: z.coerce.number().int().positive().describe('Numeric issue ID'),
-        select: z.string().optional().describe('Comma-separated list of fields to include in the response (server-side projection, same as list_issues). Significantly reduces response size. Example: "id,summary,status,notes"'),
+        id: z.coerce.number().int().positive().describe("缺陷编号（数字）"),
+        select: z.string().optional().describe("以逗号分隔的返回字段列表，由服务端裁剪。例如 id,summary,status,notes；可减少响应体积"),
       }),
       annotations: {
         readOnlyHint: true,
@@ -132,19 +131,14 @@ export function registerIssueTools(server: McpServer, client: MantisClient, cach
   server.registerTool(
     'get_issues',
     {
-      title: 'Get Multiple Issues',
-      description:
-        'Retrieve multiple MantisBT issues by their numeric IDs in a single MCP call. ' +
-        'Requests run in parallel (max 5 concurrent). ' +
-        'Missing or inaccessible IDs return null at their array position — ' +
-        'the call never fails due to individual missing IDs. ' +
-        'Response includes "requested", "found", and "failed" counters for quick validation.',
+      title: "批量读取缺陷",
+      description: '一次查询 1～50 条缺陷，最多并发 5 个 REST 请求。不存在或无权访问的编号在对应位置返回 null；单项错误不会中断整批。返回 requested、found、failed 计数。',
       inputSchema: z.object({
         ids: z
           .array(z.coerce.number().int().positive())
           .min(1)
           .max(50)
-          .describe('Array of numeric issue IDs to fetch (1–50). null is returned per ID on 404/403/error instead of failing the whole call.'),
+          .describe("待查询缺陷编号数组，1～50 项。单项遇到 404、403 或其他错误时返回 null，不中断整个查询"),
       }),
       annotations: {
         readOnlyHint: true,
@@ -190,19 +184,19 @@ export function registerIssueTools(server: McpServer, client: MantisClient, cach
   server.registerTool(
     'list_issues',
     {
-      title: 'List Issues',
-      description: 'List MantisBT issues with optional filtering. Returns a paginated list of issues. Use the "select" parameter to limit returned fields and reduce response size significantly.\n\nNote: "assigned_to", "reporter_id", "status", and date filters are applied client-side (the MantisBT REST API does not support these as server-side filters). When any of these filters are active the tool automatically fetches multiple pages internally until enough matching results are found (up to 500 issues scanned). The "page" and "page_size" parameters refer to the resulting filtered list.\n\nTip for date queries: fetching with select="id,updated_at,created_at" plus a date filter is very compact and efficient.',
+      title: "查询缺陷列表",
+      description: "分页查询 Mantis 缺陷，可按项目或已保存的筛选器查询。select 用于裁剪返回字段。\n\nassigned_to、reporter_id、status 和日期条件在客户端筛选，最多扫描 500 条缺陷；page 和 page_size 表示筛选后列表的分页。结果受扫描上限约束，不能将其当作完整项目统计。使用 select 时必须包含筛选所需字段：status、handler、reporter、updated_at 或 created_at。",
       inputSchema: z.object({
-        project_id: z.coerce.number().int().positive().optional().describe('Filter by project ID'),
-        page: z.coerce.number().int().positive().default(1).describe('Page number (default: 1)'),
-        page_size: z.coerce.number().int().min(1).max(50).default(50).describe('Issues per page (default: 50, max: 50)'),
-        assigned_to: z.coerce.number().int().positive().optional().describe('Filter by handler/assignee user ID'),
-        reporter_id: z.coerce.number().int().positive().optional().describe('Filter by reporter user ID'),
-        filter_id: z.coerce.number().int().positive().optional().describe('Use a saved MantisBT filter ID'),
-        sort: z.string().optional().describe('Sort field (e.g. "last_updated", "id")'),
-        direction: z.enum(['ASC', 'DESC']).optional().describe('Sort direction'),
-        select: z.string().optional().describe('Comma-separated list of fields to include in the response (server-side projection). Significantly reduces response size. Example: "id,summary,status,priority,handler,updated_at"'),
-        status: z.string().optional().describe('Filter issues by status name (e.g. "new", "feedback", "acknowledged", "confirmed", "assigned", "resolved", "closed") or use "open" as shorthand for all statuses with id < 80 (i.e. not yet resolved or closed). Applied client-side after fetching — when combined with pagination, a page may contain fewer results than page_size.'),
+        project_id: z.coerce.number().int().positive().optional().describe("按项目编号筛选"),
+        page: z.coerce.number().int().positive().default(1).describe("页码，默认 1"),
+        page_size: z.coerce.number().int().min(1).max(50).default(50).describe("每页缺陷数，默认 50，最大 50"),
+        assigned_to: z.coerce.number().int().positive().optional().describe("按处理人用户编号筛选"),
+        reporter_id: z.coerce.number().int().positive().optional().describe("按报告人用户编号筛选"),
+        filter_id: z.coerce.number().int().positive().optional().describe("使用已保存的 Mantis 筛选器编号"),
+        sort: z.string().optional().describe("排序字段，例如 last_updated、id"),
+        direction: z.enum(['ASC', 'DESC']).optional().describe("排序方向"),
+        select: z.string().optional().describe("以逗号分隔的返回字段列表，由服务端裁剪。例如 id,summary,status,priority,handler,updated_at"),
+        status: z.string().optional().describe("按状态名称筛选，例如 new、assigned、resolved、closed；open 表示状态编号小于 80。筛选在客户端执行，受扫描上限约束"),
         ...dateFilterSchema,
       }),
       annotations: {
@@ -315,36 +309,25 @@ export function registerIssueTools(server: McpServer, client: MantisClient, cach
   server.registerTool(
     'create_issue',
     {
-      title: 'Create Issue',
-      description: `Create a new MantisBT issue. Returns the full created issue object including the assigned id, summary, status, priority, severity, category, reporter, created_at, and view_url.
-
-Required fields: summary, description, project_id, category. All other fields are optional with sensible defaults (priority: "normal", severity: "minor").
-
-Recommended workflow:
-1. Call get_project_categories to obtain a valid category name
-2. Optionally call get_project_versions to obtain version names
-3. Optionally call find_project_member to resolve the assignee's username
-
-Both priority and severity accept canonical English names or localized labels from the connected MantisBT instance — call get_issue_enums to see all available values.
-
-For the handler, prefer the username field (resolved server-side) over handler_id when working interactively.`,
+      title: "创建缺陷",
+      description: "创建 Mantis 缺陷，返回包含编号和 view_url 的缺陷对象。summary、description、project_id、category 必填；priority 默认 normal，severity 默认 minor。\n\n先用 get_project_categories 查询分类，可用 get_project_versions 查询版本，用 find_project_member 查询处理人登录名。priority、severity 和 reproducibility 支持标准英文名或当前实例的本地化名称、标签，使用 get_issue_enums 查询。处理人通过 handler 登录名或 handler_id 编号指定，二选一。",
       inputSchema: z.object({
-        summary: z.string().min(1).describe('Issue summary/title (required)'),
-        description: z.string().min(1).describe('Detailed issue description (required). Do not create issues without a description. Plain text or Markdown.'),
-        project_id: z.coerce.number().int().positive().describe('Project ID the issue belongs to — use list_projects to discover project IDs'),
-        category: z.string().min(1).describe('Category name (required). Use get_project_categories to list available categories for the project.'),
-        priority: z.string().default('normal').describe('Priority level. Canonical English names: none, low, normal, high, urgent, immediate. Default: "normal". Use get_issue_enums to see localized labels.'),
-        severity: z.string().default('minor').describe('Severity level. Canonical English names: feature, trivial, text, tweak, minor, major, crash, block. Default: "minor". Use get_issue_enums to see localized labels.'),
-        handler_id: z.coerce.number().int().positive().optional().describe('Numeric user ID of the assignee. Alternative to the handler field — use one or the other, not both.'),
-        handler: z.string().optional().describe('MantisBT login name of the assignee. The server resolves the name to a user ID from the project member list. Use find_project_member or get_project_users to look up valid login names.'),
-        version: z.string().optional().describe('Affected product version name. Use get_project_versions to list available version names for the project.'),
-        target_version: z.string().optional().describe('Target fix version — version in which the issue is planned to be resolved. Use get_project_versions to list available version names.'),
-        fixed_in_version: z.string().optional().describe('Version in which the issue was fixed. Use get_project_versions to list available version names.'),
-        steps_to_reproduce: z.string().optional().describe('Step-by-step instructions to reproduce the issue. Plain text or Markdown.'),
-        additional_information: z.string().optional().describe('Additional context or notes about the issue. Plain text or Markdown.'),
-        reproducibility: z.string().optional().describe('How reliably the issue reproduces. Canonical English names: always, sometimes, random, have not tried, unable to reproduce, N/A. Use get_issue_enums to see localized labels.'),
-        view_state: z.enum(['public', 'private']).optional().describe('Visibility of the issue: "public" (visible to all, default) or "private" (restricted to higher-access users).'),
-        custom_fields: z.array(customFieldEntry).optional().describe('Custom field values: [{field: {id|name}, value: "<string>"}]. Use get_issue_fields or get_metadata to discover available custom fields per project.'),
+        summary: z.string().min(1).describe("缺陷标题，必填"),
+        description: z.string().min(1).describe("详细描述，必填，不允许省略。支持纯文本或 Markdown"),
+        project_id: z.coerce.number().int().positive().describe("所属项目编号，使用 list_projects 查询"),
+        category: z.string().min(1).describe("分类名称，必填，使用 get_project_categories 查询有效值"),
+        priority: z.string().default('normal').describe("优先级：none、low、normal、high、urgent、immediate，默认 normal；也支持实例本地化名称或标签，使用 get_issue_enums 查询"),
+        severity: z.string().default('minor').describe("严重程度：feature、trivial、text、tweak、minor、major、crash、block，默认 minor；也支持实例本地化名称或标签，使用 get_issue_enums 查询"),
+        handler_id: z.coerce.number().int().positive().optional().describe("处理人用户编号，与 handler 二选一"),
+        handler: z.string().optional().describe("处理人的 Mantis 登录名，服务端从项目成员中解析用户编号；使用 find_project_member 或 get_project_users 查询"),
+        version: z.string().optional().describe("受影响版本名称，使用 get_project_versions 查询"),
+        target_version: z.string().optional().describe("计划修复版本名称，使用 get_project_versions 查询"),
+        fixed_in_version: z.string().optional().describe("实际修复版本名称，使用 get_project_versions 查询"),
+        steps_to_reproduce: z.string().optional().describe("复现步骤，支持纯文本或 Markdown"),
+        additional_information: z.string().optional().describe("补充信息，支持纯文本或 Markdown"),
+        reproducibility: z.string().optional().describe("复现频率：always、sometimes、random、have not tried、unable to reproduce、N/A；也支持本地化名称或标签，使用 get_issue_enums 查询"),
+        view_state: z.enum(['public', 'private']).optional().describe("可见性：public（公开，默认）或 private（私有，访问权限由 Mantis 配置决定）"),
+        custom_fields: z.array(customFieldEntry).optional().describe("自定义字段值：[{field: {id 或 name}, value: \"字符串\"}]；字段编号和可选值应以项目实际配置为准"),
       }),
       annotations: {
         readOnlyHint: false,
@@ -440,35 +423,13 @@ For the handler, prefer the username field (resolved server-side) over handler_i
   server.registerTool(
     'update_issue',
     {
-      title: 'Update Issue',
-      description: `Update one or more fields of an existing MantisBT issue using a partial PATCH.
-
-The "fields" object accepts any combination of:
-- summary (string)
-- description (string)
-- steps_to_reproduce (string)
-- additional_information (string)
-- status: { name: "new"|"feedback"|"acknowledged"|"confirmed"|"assigned"|"resolved"|"closed" }
-- resolution: { id: 20 }  (20 = fixed/resolved)
-- handler: { id: <user_id> } or { name: "<username>" }
-- priority: { name: "<priority_name>" }
-- severity: { name: "<severity_name>" }
-- reproducibility: { name: "<reproducibility_name>" }
-- category: { name: "<category_name>" }
-- version: { name: "<version_name>" }  (affected version)
-- target_version: { name: "<version_name>" }
-- fixed_in_version: { name: "<version_name>" }
-- view_state: { name: "public"|"private" }
-- custom_fields: [{field: {id|name}, value: "<string>"}]  (only the listed custom fields are changed, others stay untouched; use get_issue_fields to discover fields)
-
-Important: when resolving an issue, always set BOTH status and resolution to avoid leaving resolution as "open".
-
-Use the optional "note" parameter to append a note in the same call (e.g. the reason for a status change) — no separate add_note call needed. For a note without field changes use add_note.`,
+      title: "更新缺陷",
+      description: "通过 PATCH 部分更新缺陷，仅修改 fields 中传入的字段。\n\n文本字段：summary、description、steps_to_reproduce、additional_information。引用字段：status、resolution、handler、priority、severity、reproducibility、category、version、target_version、fixed_in_version、view_state，使用 {id} 或 {name}。custom_fields 格式为 [{field:{id 或 name},value:\"字符串\"}]，只修改列出的自定义字段。\n\n设为已解决时需同时设置 status 和 resolution，例如 status:{id:80}、resolution:{id:20}，避免解决结果仍为未处理；实际取值先查询 get_issue_enums。\n\ndry_run=true 只预览参数，不访问更新接口。note 可在更新成功后追加备注；若备注失败，返回 note_error，缺陷更新已完成，应只重试 add_note。仅添加备注使用 add_note。",
       inputSchema: z.object({
-        id: z.coerce.number().int().positive().describe('Numeric issue ID to update'),
-        dry_run: z.preprocess(coerceBool, z.boolean().optional()).describe('If true, return the patch payload that would be sent without actually updating the issue. Useful for previewing changes before committing them.'),
-        note: z.string().min(1).optional().describe('Optional note text appended after a successful update (e.g. reason for a status change). Replaces a separate add_note call.'),
-        note_view_state: z.enum(['public', 'private']).default('public').describe('Visibility of the appended note: "public" (default) or "private". Only used when "note" is set.'),
+        id: z.coerce.number().int().positive().describe("待更新的缺陷编号"),
+        dry_run: z.preprocess(coerceBool, z.boolean().optional()).describe("设为 true 时只返回更新参数预览，不发送 PATCH，也不验证服务端写入权限或工作流"),
+        note: z.string().min(1).optional().describe("更新成功后追加的可选备注，例如状态变更原因，无需另行调用 add_note"),
+        note_view_state: z.enum(['public', 'private']).default('public').describe("追加备注的可见性：public（默认）或 private，仅在提供 note 时生效"),
         fields: z.preprocess(
           (v) => {
             if (typeof v !== 'string') return v;
@@ -491,7 +452,7 @@ Use the optional "note" parameter to append a note in the same call (e.g. the re
             fixed_in_version: ref.optional(),
             view_state: ref.optional(),
             custom_fields: z.array(customFieldEntry).optional(),
-          }).strict().describe('Fields to update (partial update — only provided fields are changed; unknown keys are rejected)')
+          }).strict().describe("需要更新的字段，仅修改传入字段；未知字段将被拒绝")
         ),
       }),
       annotations: {
@@ -550,10 +511,10 @@ Use the optional "note" parameter to append a note in the same call (e.g. the re
   server.registerTool(
     'delete_issue',
     {
-      title: 'Delete Issue',
-      description: 'Permanently delete a MantisBT issue. This action is irreversible.',
+      title: "删除缺陷",
+      description: "永久删除 Mantis 缺陷，此操作不可恢复。",
       inputSchema: z.object({
-        id: z.coerce.number().int().positive().describe('Numeric issue ID to delete'),
+        id: z.coerce.number().int().positive().describe("待删除的缺陷编号"),
       }),
       annotations: {
         readOnlyHint: false,

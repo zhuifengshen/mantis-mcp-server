@@ -2,13 +2,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { MantisClient } from '../client.js';
 import type { MantisFilter } from '../types.js';
-import { getVersionHint } from '../version-hint.js';
 
 function errorText(msg: string): string {
-  const vh = getVersionHint();
-  vh?.triggerLatestVersionFetch();
-  const hint = vh?.getUpdateHint();
-  return hint ? `Error: ${msg}\n\n${hint}` : `Error: ${msg}`;
+  return `Error: ${msg}`;
 }
 
 export function registerFilterTools(server: McpServer, client: MantisClient): void {
@@ -20,8 +16,8 @@ export function registerFilterTools(server: McpServer, client: MantisClient): vo
   server.registerTool(
     'list_filters',
     {
-      title: 'List Saved Filters',
-      description: 'List all saved MantisBT issue filters accessible to the current user. Filter IDs can be used with list_issues.',
+      title: "列出已保存的筛选器",
+      description: "列出当前用户可访问的 Mantis 筛选器，返回的编号可用于 list_issues 的 filter_id。",
       inputSchema: z.object({}),
       annotations: {
         readOnlyHint: true,

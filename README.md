@@ -1,260 +1,116 @@
-# MantisBT MCP Server
+# Mantis Workflow MCP Server
 
-[![npm version](https://img.shields.io/npm/v/@dpesch/mantisbt-mcp-server)](https://www.npmjs.com/package/@dpesch/mantisbt-mcp-server)
-[![license](https://img.shields.io/npm/l/@dpesch/mantisbt-mcp-server)](LICENSE)
-[![MCP compatible](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
-[![MCP Badge](https://lobehub.com/badge/mcp/dpesch-mantisbt-mcp-server)](https://lobehub.com/mcp/dpesch-mantisbt-mcp-server)
-[![MantisBT MCP Server](https://glama.ai/mcp/servers/dpesch/mantisbt-mcp-server/badges/card.svg)](https://glama.ai/mcp/servers/dpesch/mantisbt-mcp-server)
+通过 MCP 将 MantisBT 缺陷处理接入 Coding Agent：查询缺陷、读取上下文、登记修复与自测、延期与重开、追加备注、上传附件，并按原操作编号核查和恢复部分成功的操作。服务使用本地 **stdio**，REST 路径为 `/api/rest/`。
 
-**English** · [Deutsch](README.de.md)
+[调用手册](docs/cookbook.md) · [场景示例](docs/examples.md) · [6.0 迁移说明](docs/migration-v6.md) · [GitHub Releases](https://github.com/zhuifengshen/mantis-mcp-server/releases)
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that integrates the [MantisBT REST API](https://documenter.getpostman.com/view/29959/mantis-bug-tracker-rest-api) into Claude Code and other MCP-capable clients. Read, create, and update issues directly from your editor.
+## 安装
 
-## Requirements
+需要 Node.js 22.12+（22.x）、24.x 或26+，以及已启用 REST API 的 MantisBT 和个人 API Key。已验证 MantisBT 2.26.2 的工作流；部署方需使用已包含官方安全修复的服务端，并核对自身状态流转、枚举和权限配置。
 
-- Node.js ≥ 18
-- MantisBT installation with REST API enabled (version 2.23+)
-- MantisBT API token (create under *My Account → API Tokens*)
+通过 npm 安装固定版本：
 
-## Installation
+```bash
+npm install --global @youcloud/mantis-mcp-server@6.0.0
+```
 
-**Via npx (recommended):**
+也可以从 GitHub Releases 下载 `.tgz` 及 `.sha256` 文件，核对摘要后安装。安装时需要联网下载生产依赖；无需自行编译 TypeScript。
 
-Add to `~/.claude/claude_desktop_config.json` (Claude Desktop) or your local
-`claude_desktop_config.json` (Claude Code):
+```bash
+npm install --global ./下载的安装包.tgz
+```
+
+安装后命令为 `mantis-mcp-server`。这是由 MCP 客户端启动的 stdio 服务，直接在终端运行会等待协议输入。
+
+## 配置凭据与业务映射
+
+在启动 MCP 客户端的环境中设置 `MANTIS_BASE_URL` 和 `MANTIS_API_KEY`。基地址示例为 `https://mantis.example.org`，不要添加 `index.php`。API Key 使用当前操作者自己的账号权限，不写入仓库或共享配置文件。
+
+将[工作流配置示例](docs/workflow-config.example.json)另存到稳定的绝对路径，例如 `/绝对路径/mantis-workflow.json`，核对项目状态、解决结果和必填业务字段后设置 `MANTIS_WORKFLOW_CONFIG`。示例中的编号是配置样例，不是对所有 Mantis 部署的假设。
+
+| 环境变量 | 用途 |
+|---|---|
+| `MANTIS_BASE_URL` | Mantis 基地址 |
+| `MANTIS_API_KEY` | 当前使用者的个人 Key |
+| `MANTIS_WORKFLOW_CONFIG` | 动作绑定 JSON 的绝对路径；修改后重启服务 |
+| `MANTIS_MCP_ENABLE_DESTRUCTIVE_TOOLS` | 默认 `false`；设为 `true` 后开放关闭、删除和版本管理，仍由 Mantis 授权 |
+| `MANTIS_CACHE_DIR` | 本机账本与缓存目录，默认 `~/.cache/mantisbt-mcp` |
+| `MANTIS_CACHE_TTL` | 展示缓存秒数，默认3600；写前始终实时读取 |
+| `MANTIS_UPLOAD_DIR` | 可选的附件读取范围；按真实路径限制 |
+
+没有凭据时可以发现工具，实际调用需要凭据。缺少业务映射的动作会明确拒绝。`supported_actions` 表示已配置能力，不是账号权限清单。
+
+### Codex
+
+在 `~/.codex/config.toml` 中添加以下配置。`env_vars` 转发环境变量名称；实际值来自启动 Codex 的环境，Key 不必写进 TOML。参见 [OpenAI 官方 MCP 文档](https://developers.openai.com/codex/mcp)。
+
+```toml
+[mcp_servers.mantis]
+command = "npx"
+args = ["-y", "@youcloud/mantis-mcp-server@6.0.0"]
+env_vars = ["MANTIS_BASE_URL", "MANTIS_API_KEY", "MANTIS_WORKFLOW_CONFIG"]
+startup_timeout_sec = 60
+tool_timeout_sec = 180
+```
+
+已全局安装时，也可以将 `command` 改为 `mantis-mcp-server` 并移除 `args`。桌面客户端须能找到 Node.js/npm，且能读取上述环境；通过 nvm 安装 Node.js 时，可使用命令的绝对路径。
+
+### 其他 MCP 客户端
+
+支持 `mcpServers` JSON 配置的客户端可以使用以下命令配置，并通过该客户端的环境或凭据设置传入前述变量。变量插值方式由客户端定义，不假定所有客户端支持相同的 `${...}` 语法。
 
 ```json
 {
   "mcpServers": {
-    "mantisbt": {
+    "mantis": {
       "command": "npx",
-      "args": ["-y", "@dpesch/mantisbt-mcp-server"],
-      "env": {
-        "MANTIS_BASE_URL": "https://your-mantis.example.com/api/rest",
-        "MANTIS_API_KEY": "your-api-token"
-      }
+      "args": ["-y", "@youcloud/mantis-mcp-server@6.0.0"]
     }
   }
 }
 ```
 
-**Local build:**
+## 工具目录
+
+| 分类 | 工具 |
+|---|---|
+| 默认只读 | `get_project_context`、`list_issues`、`get_issue_context`、`get_workflow_operation` |
+| 默认业务写入 | `report_issue`、`accept_issue`、`assign_issue`、`submit_fix`、`reopen_issue`、`reject_issue`、`postpone_issue`、`add_note`、`upload_file` |
+| 可选扩展 | `close_issue`、`delete_issue`、`delete_note`、`remove_relationship`、`remove_monitor`、`detach_tag`、`create_version`、`update_version`、`release_version`、`delete_version` |
+
+默认13个工具，扩展启用后23个。提供5个提示词，包括 `fix-assigned-issues` 连续修复流程，以及 `mantis://me`、`mantis://projects`、`mantis://enums` 和项目资源模板。
+
+## 使用与恢复
+
+推荐流程：查询本人未解决缺陷 → `get_issue_context` → Agent 修改代码并自测 → `submit_fix`。只在自测实际通过后登记；研发提交修复不代表测试验收，默认由测试人员在 Mantis 中关闭。
+
+真实写入提供独立 UUID `operation_id`，修改已有对象还需 context 返回的 `expected_revision`；版本修改使用 `versions_revision`。`dry_run=true` 仅预览，不证明写权限。
+
+- `succeeded`：所有必要步骤及核查完成。
+- `partial_success`：保留已成功步骤，按原编号核查，不重复已成功主写入。
+- `unknown`：执行效果未知，不换 UUID 或盲目重发，先调用 `get_workflow_operation`。
+
+只有返回 `retry_same_operation` 时，才用原工具、原参数和原编号加 `resume=true` 恢复。若主写入后首次回读失败，须匹配持久化的完整响应摘要才能补建恢复快照；并发变化或证据不足时返回 `manual_review`。
+
+账本按实例、用户和凭据域隔离，恢复窗口为7天；目录0700、文件0600。账本包含恢复所需的原备注正文，不保存 API Key 或附件 Base64。查询有扫描预算和游标，不承诺数据库快照或精确总数；多次 REST 写入也不是原子事务。
+
+## 附件与部署边界
+
+一次上传一个普通文件，使用绝对路径；大小范围为1至41,943,040字节。具体扩展名见工具说明或项目 `uploads` 区块，目录和特殊文件不受支持。
+
+REST 上传使用 JSON/Base64，编码后约增加三分之一体积。40 MiB 原文件仅 Base64 就需要55,924,056字节，还需加上 JSON 开销。Mantis、PHP 和反向代理的请求体限制须容纳实际请求；本地40 MiB政策不等于所有部署都支持该大小。上传结果未知时先核查原操作，不能直接重传。
+
+不同项目的权限、必填字段和自定义工作流需在对应部署验收。通过工具发现或离线测试不代表线上写权限已通过验证。
+
+## 开发与许可证
 
 ```bash
-git clone https://codeberg.org/dpesch/mantisbt-mcp-server
-cd mantisbt-mcp-server
-npm run init
-npm run build
+npm ci
+npm run typecheck
+npm test
+npm run test:package
 ```
 
-```json
-{
-  "mcpServers": {
-    "mantisbt": {
-      "command": "node",
-      "args": ["/path/to/mantisbt-mcp-server/dist/index.js"],
-      "env": {
-        "MANTIS_BASE_URL": "https://your-mantis.example.com/api/rest",
-        "MANTIS_API_KEY": "your-api-token"
-      }
-    }
-  }
-}
-```
+`test:package` 会构建、打包，并在独立目录仅安装生产依赖后通过真实命令入口验证13/23工具及 stdio 握手，输出安装包、SHA-256和验证记录到 `artifacts/`。贡献方式见 [CONTRIBUTING.md](https://github.com/zhuifengshen/mantis-mcp-server/blob/main/CONTRIBUTING.md)。
 
-## Configuration
-
-### Environment variables
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `MANTIS_BASE_URL` | ✅ | – | Base URL of your MantisBT installation. Both `https://your-mantis.example.com` and `https://your-mantis.example.com/api/rest` are accepted — the `/api/rest` suffix is normalized automatically. |
-| `MANTIS_API_KEY` | ✅ | – | API token for authentication |
-| `MANTIS_USE_INDEX_PHP` | – | auto | Set to `true` when URL rewriting is unavailable — REST requests then use `/api/rest/index.php/` instead of `/api/rest/`. Detected automatically when `MANTIS_BASE_URL` ends with `/api/rest/index.php`; an explicit value always wins. See the [cookbook](docs/cookbook.md#connect-to-an-installation-without-url-rewriting). |
-| `MANTIS_CACHE_DIR` | – | `~/.cache/mantisbt-mcp` | Directory for the metadata cache |
-| `MANTIS_CACHE_TTL` | – | `3600` | Cache lifetime in seconds |
-| `TRANSPORT` | – | `stdio` | Transport mode: `stdio` or `http` |
-| `PORT` | – | `3000` | Port for HTTP mode |
-| `MCP_HTTP_HOST` | – | `127.0.0.1` | Bind address for HTTP mode. **Changed from `0.0.0.0` to `127.0.0.1`** — the server now listens on localhost only by default. Set to `0.0.0.0` for Docker or remote access. |
-| `MCP_HTTP_TOKEN` | ✅ (HTTP mode) | – | Bearer token for the `/mcp` endpoint (`Authorization: Bearer <token>`). **Required when `TRANSPORT=http`** — the server refuses to start in HTTP mode without it, so tools are never exposed unauthenticated. Ignored in stdio mode. The `/health` endpoint is always public. |
-| `MANTIS_SEARCH_ENABLED` | – | `false` | Set to `true` to enable semantic search |
-| `MANTIS_SEARCH_BACKEND` | – | `vectra` | Vector store backend: `vectra` (pure JS) or `sqlite-vec` (requires manual install) |
-| `MANTIS_SEARCH_DIR` | – | `{MANTIS_CACHE_DIR}/search` | Directory for the search index |
-| `MANTIS_SEARCH_MODEL` | – | `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | Embedding model name (downloaded once on first use, ~80 MB) |
-| `MANTIS_SEARCH_THREADS` | – | `1` | Number of ONNX intra-op threads for the embedding model. Default is 1 to prevent CPU saturation on multi-core machines and WSL. Increase only if index rebuild speed matters and the host is dedicated to this workload. |
-| `MANTIS_UPLOAD_DIR` | – | – | Restrict `upload_file`'s `file_path` to files within this directory (path traversal via `../` is blocked). In **stdio mode** `file_path` is unrestricted unless this is set. In **HTTP mode** `file_path` reads from the server's filesystem, so it is **disabled unless this variable is set** — HTTP clients should upload via the `content` (Base64) parameter instead. |
-
-## Available tools
-
-### Issues
-
-| Tool | Description |
-|---|---|
-| `get_issue` | Retrieve an issue by its numeric ID; optional `select` for field projection to reduce response size |
-| `get_issues` | Retrieve multiple issues by ID in one call (1–50 IDs); missing or inaccessible IDs return `null` at their position instead of failing the call |
-| `list_issues` | Filter issues by project, status, author, and more; optional `select` for field projection and `status` for client-side status filtering — canonical English status names (e.g. `"new"`, `"resolved"`) are matched by ID, making the filter language-independent on localized installations |
-| `create_issue` | Create a new issue; `severity` and `priority` must be canonical English names (e.g. `minor`, `major`, `normal`, `high`) — call `get_issue_enums` to see all valid values and their localized labels; optional `handler` parameter accepts a username as alternative to `handler_id` (resolved against project members); optional `custom_fields` to set custom field values |
-| `update_issue` | Update an existing issue; enum fields (`status`, `priority`, `severity`, `resolution`, `reproducibility`) accept canonical English names, localized names, or numeric IDs — the server resolves names to IDs automatically; supports `custom_fields` and an optional `note` parameter that appends a note in the same call (e.g. the reason for a status change) |
-| `delete_issue` | Delete an issue |
-
-### Notes
-
-| Tool | Description |
-|---|---|
-| `list_notes` | List all notes of an issue |
-| `add_note` | Add a note to an issue |
-| `delete_note` | Delete a note |
-
-### Attachments
-
-| Tool | Description |
-|---|---|
-| `list_issue_files` | List attachments of an issue |
-| `upload_file` | Upload a file to an issue — preferred: local `file_path` (server reads and encodes automatically); fallback: Base64-encoded `content` + `filename` (use only when `file_path` is not available) |
-
-### Relationships
-
-| Tool | Description |
-|---|---|
-| `add_relationship` | Create a relationship between two issues; optional `type_name` parameter accepts a string name (e.g. `"related_to"`, `"duplicate_of"`) as alternative to numeric `type_id` |
-| `remove_relationship` | Remove a relationship from an issue (use the `id` from the relationship object, not the type) |
-
-### Monitors
-
-| Tool | Description |
-|---|---|
-| `add_monitor` | Add a user as a monitor of an issue |
-| `remove_monitor` | Remove a user as a monitor of an issue |
-
-### Tags
-
-| Tool | Description |
-|---|---|
-| `list_tags` | List all available tags; falls back to the metadata cache when `GET /tags` returns 404 (run `sync_metadata` first to populate) |
-| `attach_tags` | Attach tags to an issue |
-| `detach_tag` | Remove a tag from an issue |
-
-### Projects
-
-| Tool | Description |
-|---|---|
-| `list_projects` | List all accessible projects; returns normalized project data (consistent with `sync_metadata` cache) |
-| `get_project_versions` | Get versions of a project; optional `obsolete` and `inherit` booleans to include obsolete or parent-inherited versions |
-| `get_project_categories` | Get categories of a project |
-| `get_project_users` | Get users of a project |
-| `find_project_member` | Search project members by name, real name, or email (case-insensitive substring match); optional `query` and `limit` (default 10, max 100); cache-first |
-
-### Semantic search *(optional)*
-
-Instead of exact keyword matching, semantic search understands the *meaning* behind a query. Ask in plain language — the search engine finds conceptually related issues even when the wording doesn't match:
-
-- *"login fails after password reset"* — finds issues about authentication edge cases
-- *"performance problems on the checkout page"* — surfaces related reports regardless of the exact terminology used
-- *"duplicate entries in the invoice list"* — catches issues described as "shown twice", "double records", etc.
-
-The embedding model (~80 MB) runs entirely **offline** — no OpenAI key, no external API. It is downloaded once on first start and cached locally. Issues are indexed incrementally on every server start (only new and updated issues are re-indexed).
-
-Activate with `MANTIS_SEARCH_ENABLED=true`.
-
-| Tool | Description |
-|---|---|
-| `search_issues` | Natural language search over all indexed issues — returns top-N results with cosine similarity score; optional `select` (comma-separated field names) enriches each result with the requested issue fields; optional `highlight` (boolean, default `false`) adds a `highlights` field per result with keyword-matched excerpts from `summary` and `description` (matched terms shown in `**bold**`) |
-| `rebuild_search_index` | Build or update the search index; `full: true` clears and rebuilds from scratch |
-| `get_search_index_status` | Return the current fill level of the search index: how many issues are indexed vs. total, and the timestamp of the last sync |
-
-#### Which backend to choose?
-
-| | `vectra` *(default)* | `sqlite-vec` |
-|---|---|---|
-| Dependencies | None (pure JS) | Requires native build tools |
-| Install | Included | `npm install sqlite-vec better-sqlite3` |
-| Best for | Up to ~10,000 issues | 10,000+ issues |
-| Performance | Fast enough for most setups | Faster for large corpora |
-
-Start with `vectra`. Switch to `sqlite-vec` if indexing or query times become noticeably slow.
-
-```bash
-npm install sqlite-vec better-sqlite3
-# then set MANTIS_SEARCH_BACKEND=sqlite-vec
-```
-
-### Metadata & system
-
-| Tool | Description |
-|---|---|
-| `get_issue_fields` | Return all field names valid for the `select` parameter of `list_issues` |
-| `get_metadata` | Retrieve a compact metadata summary: project/tag counts and per-project user/version/category counts; use `get_metadata_full` for complete arrays |
-| `get_metadata_full` | Return the full raw metadata cache as minified JSON (all projects with complete fields, users/versions/categories per project, all tags) |
-| `sync_metadata` | Refresh the metadata cache |
-| `list_filters` | List saved filters |
-| `get_current_user` | Retrieve your own user profile |
-| `list_languages` | List available languages |
-| `get_config` | Show server configuration (base URL, cache TTL) |
-| `get_issue_enums` | Return valid ID/name pairs for all issue enum fields (severity, status, priority, resolution, reproducibility) — use before `create_issue` / `update_issue` to look up correct values; on localized installations each entry may include a `canonical_name` with the standard English API name |
-| `get_mantis_version` | Get MantisBT version and check for updates |
-| `get_mcp_version` | Return the version of this mantisbt-mcp-server instance |
-
-## Available resources
-
-MCP Resources are URI-addressable, read-only data that clients can fetch directly without calling a tool. They are the third MCP primitive alongside Tools and Prompts. Note that Resource support is less widely implemented in MCP clients than Tools — check your client's documentation.
-
-| Resource URI | Description |
-|---|---|
-| `mantis://me` | Profile of the authenticated API user (live fetch) |
-| `mantis://projects` | All accessible MantisBT projects as a compact list (cache-backed, refreshed via `sync_metadata`) |
-| `mantis://projects/{id}` | Combined project view: project fields + users + versions + categories in one call; cache-first, list-support for enumerating all available project URIs |
-| `mantis://enums` | Valid values for all issue enum fields: severity, priority, status, resolution, reproducibility (live fetch) |
-
-## Available prompts
-
-MCP prompt templates are conversation starters that instruct the LLM to collect structured input and then call the appropriate tool. They are not tools themselves — they initiate a guided workflow.
-
-| Prompt | Required args | Optional args | Description |
-|---|---|---|---|
-| `create-bug-report` | `project_id`, `category`, `summary`, `description` | `steps_to_reproduce`, `expected`, `actual`, `environment` | Guides through a structured bug report and calls `create_issue` |
-| `create-feature-request` | `project_id`, `category`, `summary`, `description` | `use_case` | Guides through a feature request and calls `create_issue` |
-| `summarize-issue` | `issue_id` | – | Fetches an issue via `get_issue` and returns a concise summary |
-| `project-status` | `project_id` | – | Lists issues via `list_issues` and generates a status report grouped by severity |
-
-## HTTP mode
-
-For use as a standalone server (e.g. in remote setups). `MCP_HTTP_TOKEN` is **required** in HTTP mode — the server refuses to start without it:
-
-```bash
-MCP_HTTP_TOKEN=secret MANTIS_BASE_URL=... MANTIS_API_KEY=... \
-  TRANSPORT=http PORT=3456 node dist/index.js
-
-# With explicit bind address (required for Docker/remote):
-# MCP_HTTP_TOKEN=secret MANTIS_BASE_URL=... MANTIS_API_KEY=... \
-#   TRANSPORT=http PORT=3456 MCP_HTTP_HOST=0.0.0.0 node dist/index.js
-```
-
-Every `/mcp` request must send `Authorization: Bearer <token>`. Over HTTP, `upload_file`'s `file_path` is disabled unless `MANTIS_UPLOAD_DIR` is set — use the `content` (Base64) parameter instead.
-
-Health check: `GET http://localhost:3456/health` (always public, no token required)
-
-## Documentation
-
-- [**Cookbook**](docs/cookbook.md) — tool-oriented recipes with copy-paste-ready parameter examples for all registered tools
-- [**Usage Examples**](docs/examples.md) — natural language prompt examples for everyday use cases (no tool names required)
-
-## Development
-
-```bash
-npm run init         # First-time setup: install deps, git hooks, typecheck
-npm run build        # Compile TypeScript → dist/
-npm run typecheck    # Type check without output
-npm run dev          # Watch mode for development
-npm test             # Run tests (vitest)
-npm run test:watch   # Run tests in watch mode
-npm run test:coverage # Coverage report
-```
-
-## License
-
-MIT – see [LICENSE](LICENSE)
-
-## Contributing
-
-Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md).
-Repository: [codeberg.org/dpesch/mantisbt-mcp-server](https://codeberg.org/dpesch/mantisbt-mcp-server)
+本项目基于 [Dominik Pesch 的 mantisbt-mcp-server](https://github.com/dpesch/mantisbt-mcp-server) 开发，保留 [MIT 许可证](LICENSE)及原作者版权声明。6.0 工具协议与上游旧版本不同，升级前请阅读迁移说明。

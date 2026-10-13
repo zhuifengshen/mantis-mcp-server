@@ -6,16 +6,16 @@ import { z } from 'zod';
 
 export const dateFilterSchema = {
   updated_after: z.string().optional().describe(
-    'ISO-8601 timestamp — only return issues updated after this date (exclusive). Example: "2026-03-25T00:00:00Z"'
+    "ISO-8601 时间戳：仅返回此时间之后更新的缺陷，不含边界。例如 2026-03-25T00:00:00Z"
   ),
   updated_before: z.string().optional().describe(
-    'ISO-8601 timestamp — only return issues updated before this date (exclusive). Example: "2026-03-28T00:00:00Z"'
+    "ISO-8601 时间戳：仅返回此时间之前更新的缺陷，不含边界。例如 2026-03-28T00:00:00Z"
   ),
   created_after: z.string().optional().describe(
-    'ISO-8601 timestamp — only return issues created after this date (exclusive). Example: "2026-03-01T00:00:00Z"'
+    "ISO-8601 时间戳：仅返回此时间之后创建的缺陷，不含边界。例如 2026-03-01T00:00:00Z"
   ),
   created_before: z.string().optional().describe(
-    'ISO-8601 timestamp — only return issues created before this date (exclusive). Example: "2026-03-15T00:00:00Z"'
+    "ISO-8601 时间戳：仅返回此时间之前创建的缺陷，不含边界。例如 2026-03-15T00:00:00Z"
   ),
 };
 

@@ -32,6 +32,10 @@ async function freshGetStartupConfig(): Promise<(typeof import('../src/config.js
 beforeEach(() => {
   vi.resetAllMocks();
   vi.unstubAllEnvs();
+  vi.stubEnv('MANTIS_BASE_URL', undefined);
+  vi.stubEnv('MANTIS_API_KEY', undefined);
+  vi.stubEnv('MANTIS_MCP_ENABLE_DESTRUCTIVE_TOOLS', undefined);
+  vi.stubEnv('MANTIS_WORKFLOW_CONFIG', undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -112,99 +116,7 @@ describe('getConfig() – ENV variables', () => {
     expect(config.cacheDir).toBe('/custom/cache/dir');
   });
 
-  it('enables index.php routing when MANTIS_USE_INDEX_PHP is true', async () => {
-    vi.stubEnv('MANTIS_BASE_URL', 'https://mantis.example.com');
-    vi.stubEnv('MANTIS_API_KEY', 'key');
-    vi.stubEnv('MANTIS_USE_INDEX_PHP', 'true');
 
-    const getConfig = await freshGetConfig();
-    const config = await getConfig();
-
-    expect(config.useIndexPhp).toBe(true);
-  });
-
-  it('disables index.php routing by default', async () => {
-    vi.stubEnv('MANTIS_BASE_URL', 'https://mantis.example.com');
-    vi.stubEnv('MANTIS_API_KEY', 'key');
-
-    const getConfig = await freshGetConfig();
-    const config = await getConfig();
-
-    expect(config.useIndexPhp).toBe(false);
-  });
-
-  it('auto-detects index.php routing from an /api/rest/index.php base URL', async () => {
-    vi.stubEnv('MANTIS_BASE_URL', 'https://mantis.example.com/api/rest/index.php');
-    vi.stubEnv('MANTIS_API_KEY', 'key');
-
-    const getConfig = await freshGetConfig();
-    const config = await getConfig();
-
-    expect(config.useIndexPhp).toBe(true);
-    expect(config.baseUrl).toBe('https://mantis.example.com');
-  });
-
-  it('auto-detects index.php routing despite a trailing slash', async () => {
-    vi.stubEnv('MANTIS_BASE_URL', 'https://mantis.example.com/api/rest/index.php/');
-    vi.stubEnv('MANTIS_API_KEY', 'key');
-
-    const getConfig = await freshGetConfig();
-    const config = await getConfig();
-
-    expect(config.useIndexPhp).toBe(true);
-  });
-
-  it('auto-detects index.php routing regardless of URL case', async () => {
-    vi.stubEnv('MANTIS_BASE_URL', 'https://mantis.example.com/API/REST/Index.PHP');
-    vi.stubEnv('MANTIS_API_KEY', 'key');
-
-    const getConfig = await freshGetConfig();
-    const config = await getConfig();
-
-    expect(config.useIndexPhp).toBe(true);
-    expect(config.baseUrl).toBe('https://mantis.example.com');
-  });
-
-  it('lets an explicit MANTIS_USE_INDEX_PHP=false override the auto-detected URL', async () => {
-    vi.stubEnv('MANTIS_BASE_URL', 'https://mantis.example.com/api/rest/index.php');
-    vi.stubEnv('MANTIS_API_KEY', 'key');
-    vi.stubEnv('MANTIS_USE_INDEX_PHP', 'false');
-    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
-
-    const getConfig = await freshGetConfig();
-    const config = await getConfig();
-
-    expect(config.useIndexPhp).toBe(false);
-    stderr.mockRestore();
-  });
-
-  it('warns on stderr when the base URL contradicts an explicit MANTIS_USE_INDEX_PHP=false', async () => {
-    vi.stubEnv('MANTIS_BASE_URL', 'https://mantis.example.com/api/rest/index.php');
-    vi.stubEnv('MANTIS_API_KEY', 'key');
-    vi.stubEnv('MANTIS_USE_INDEX_PHP', 'false');
-    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
-
-    const getConfig = await freshGetConfig();
-    await getConfig();
-
-    const written = stderr.mock.calls.map((call) => String(call[0])).join('');
-    expect(written).toContain('MANTIS_USE_INDEX_PHP');
-    stderr.mockRestore();
-  });
-
-  it('does not warn when base URL and explicit flag agree', async () => {
-    vi.stubEnv('MANTIS_BASE_URL', 'https://mantis.example.com');
-    vi.stubEnv('MANTIS_API_KEY', 'key');
-    vi.stubEnv('MANTIS_USE_INDEX_PHP', 'false');
-    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
-
-    const getConfig = await freshGetConfig();
-    await getConfig();
-
-    const written = stderr.mock.calls.map((call) => String(call[0])).join('');
-    expect(written).not.toContain('MANTIS_USE_INDEX_PHP');
-    stderr.mockRestore();
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -252,79 +164,32 @@ describe('getConfig() – errors', () => {
 });
 
 // ---------------------------------------------------------------------------
-// HTTP transport configuration
-// ---------------------------------------------------------------------------
-
-describe('getConfig() – HTTP transport', () => {
-  it('uses 127.0.0.1 as default httpHost', async () => {
-    vi.stubEnv('MANTIS_BASE_URL', 'https://mantis.example.com');
-    vi.stubEnv('MANTIS_API_KEY', 'key');
-
-    const getConfig = await freshGetConfig();
-    const config = await getConfig();
-
-    expect(config.httpHost).toBe('127.0.0.1');
-  });
-
-  it('uses 3000 as default httpPort', async () => {
-    vi.stubEnv('MANTIS_BASE_URL', 'https://mantis.example.com');
-    vi.stubEnv('MANTIS_API_KEY', 'key');
-
-    const getConfig = await freshGetConfig();
-    const config = await getConfig();
-
-    expect(config.httpPort).toBe(3000);
-  });
-
-  it('uses PORT when set', async () => {
-    vi.stubEnv('MANTIS_BASE_URL', 'https://mantis.example.com');
-    vi.stubEnv('MANTIS_API_KEY', 'key');
-    vi.stubEnv('PORT', '8080');
-
-    const getConfig = await freshGetConfig();
-    const config = await getConfig();
-
-    expect(config.httpPort).toBe(8080);
-  });
-
-  it('uses MCP_HTTP_HOST when set', async () => {
-    vi.stubEnv('MANTIS_BASE_URL', 'https://mantis.example.com');
-    vi.stubEnv('MANTIS_API_KEY', 'key');
-    vi.stubEnv('MCP_HTTP_HOST', '0.0.0.0');
-
-    const getConfig = await freshGetConfig();
-    const config = await getConfig();
-
-    expect(config.httpHost).toBe('0.0.0.0');
-  });
-
-  it('leaves httpToken undefined when MCP_HTTP_TOKEN is not set', async () => {
-    vi.stubEnv('MANTIS_BASE_URL', 'https://mantis.example.com');
-    vi.stubEnv('MANTIS_API_KEY', 'key');
-
-    const getConfig = await freshGetConfig();
-    const config = await getConfig();
-
-    expect(config.httpToken).toBeUndefined();
-  });
-
-  it('reads httpToken from MCP_HTTP_TOKEN', async () => {
-    vi.stubEnv('MANTIS_BASE_URL', 'https://mantis.example.com');
-    vi.stubEnv('MANTIS_API_KEY', 'key');
-    vi.stubEnv('MCP_HTTP_TOKEN', 'secret-token');
-
-    const getConfig = await freshGetConfig();
-    const config = await getConfig();
-
-    expect(config.httpToken).toBe('secret-token');
-  });
-});
-
-// ---------------------------------------------------------------------------
 // getStartupConfig — never throws without credentials
 // ---------------------------------------------------------------------------
 
 describe('getStartupConfig()', () => {
+  it.each([undefined, '', 'false'])('keeps administrative tools disabled for %s', async value => {
+    vi.stubEnv('MANTIS_MCP_ENABLE_DESTRUCTIVE_TOOLS', value);
+    const getStartupConfig = await freshGetStartupConfig();
+    expect((await getStartupConfig()).enableDestructiveTools).toBe(false);
+  });
+
+  it('enables all administrative tools only for the literal true flag', async () => {
+    vi.stubEnv('MANTIS_MCP_ENABLE_DESTRUCTIVE_TOOLS', 'true');
+    vi.stubEnv('MANTIS_WORKFLOW_CONFIG', '/tmp/deployment/workflow.json');
+    const getStartupConfig = await freshGetStartupConfig();
+    expect(await getStartupConfig()).toMatchObject({
+      enableDestructiveTools: true,
+      workflowConfigPath: '/tmp/deployment/workflow.json',
+    });
+  });
+
+  it.each(['1', 'TRUE', 'yes', ' false '])('rejects ambiguous administrative flag %s', async value => {
+    vi.stubEnv('MANTIS_MCP_ENABLE_DESTRUCTIVE_TOOLS', value);
+    const getStartupConfig = await freshGetStartupConfig();
+    await expect(getStartupConfig()).rejects.toThrow('MANTIS_MCP_ENABLE_DESTRUCTIVE_TOOLS');
+  });
+
   it('succeeds without MANTIS_BASE_URL and MANTIS_API_KEY', async () => {
     vi.mocked(readFile).mockRejectedValue(new Error('ENOENT'));
 
@@ -333,8 +198,6 @@ describe('getStartupConfig()', () => {
 
     expect(config).toBeDefined();
     expect(config.cacheTtl).toBe(3600);
-    expect(config.httpHost).toBe('127.0.0.1');
-    expect(config.httpPort).toBe(3000);
   });
 
   it('does not include baseUrl or apiKey', async () => {
@@ -372,27 +235,5 @@ describe('getConfig() – singleton', () => {
     const second = await getConfig();
 
     expect(first).toBe(second);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// HTTP transport auth guard
-// ---------------------------------------------------------------------------
-
-describe('assertHttpAuthConfigured()', () => {
-  it('throws when the token is undefined', async () => {
-    const mod = await import('../src/config.js');
-    expect(() => mod.assertHttpAuthConfigured(undefined)).toThrow(/MCP_HTTP_TOKEN/);
-  });
-
-  it('throws when the token is empty or whitespace', async () => {
-    const mod = await import('../src/config.js');
-    expect(() => mod.assertHttpAuthConfigured('')).toThrow(/MCP_HTTP_TOKEN/);
-    expect(() => mod.assertHttpAuthConfigured('   ')).toThrow(/MCP_HTTP_TOKEN/);
-  });
-
-  it('accepts a non-empty token', async () => {
-    const mod = await import('../src/config.js');
-    expect(() => mod.assertHttpAuthConfigured('s3cret')).not.toThrow();
   });
 });

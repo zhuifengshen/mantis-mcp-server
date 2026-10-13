@@ -19,8 +19,6 @@ import { registerMonitorTools } from '../../src/tools/monitors.js';
 import { registerRelationshipTools } from '../../src/tools/relationships.js';
 import { registerTagTools } from '../../src/tools/tags.js';
 import { registerProjectTools } from '../../src/tools/projects.js';
-import { registerVersionTools } from '../../src/tools/version.js';
-import { VersionHintService } from '../../src/version-hint.js';
 import { MockMcpServer, makeResponse } from '../helpers/mock-server.js';
 
 // ---------------------------------------------------------------------------
@@ -41,7 +39,6 @@ beforeEach(() => {
   registerRelationshipTools(mockServer as never, client);
   registerTagTools(mockServer as never, client);
   registerProjectTools(mockServer as never, client);
-  registerVersionTools(mockServer as never, client, new VersionHintService(), '0.0.0-test');
   vi.stubGlobal('fetch', vi.fn());
 });
 
@@ -298,18 +295,6 @@ describe('string-coercion – get_project_versions boolean flags', () => {
     const result = await mockServer.callTool(
       'get_project_versions',
       { project_id: 3, obsolete: 'true', inherit: 'false' },
-      { validate: true },
-    );
-    expect(result.isError).toBeUndefined();
-  });
-});
-
-describe('string-coercion – get_mantis_version check_latest as string', () => {
-  it('accepts check_latest "false" as boolean false', async () => {
-    vi.mocked(fetch).mockResolvedValue(makeResponse(200, JSON.stringify({ version: '2.26.0' })));
-    const result = await mockServer.callTool(
-      'get_mantis_version',
-      { check_latest: 'false' },
       { validate: true },
     );
     expect(result.isError).toBeUndefined();

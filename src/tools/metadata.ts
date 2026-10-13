@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { MantisClient } from '../client.js';
 import { MetadataCache, type CachedMetadata, type CachedProjectMeta } from '../cache.js';
 import type { MantisProject, MantisIdName, MantisUser, MantisVersion, MantisCategory, MantisTag, MantisPaginatedIssues } from '../types.js';
-import { getVersionHint } from '../version-hint.js';
 import { ALL_PROJECTS_PREFIX } from '../constants.js';
 
 // Fields MantisBT strips from issue responses when the array is empty.
@@ -59,10 +58,7 @@ const STATIC_ISSUE_FIELDS = [
 ];
 
 function errorText(msg: string): string {
-  const vh = getVersionHint();
-  vh?.triggerLatestVersionFetch();
-  const hint = vh?.getUpdateHint();
-  return hint ? `Error: ${msg}\n\n${hint}` : `Error: ${msg}`;
+  return `Error: ${msg}`;
 }
 
 async function collectTagsFromIssues(client: MantisClient, projects: MantisProject[]): Promise<MantisTag[]> {
@@ -182,14 +178,8 @@ export function registerMetadataTools(server: McpServer, client: MantisClient, c
   server.registerTool(
     'sync_metadata',
     {
-      title: 'Sync Metadata Cache',
-      description: `Fetch all projects and their associated users, versions, categories, and tags from MantisBT and store them in the local metadata cache.
-
-Tags are fetched via the dedicated GET /tags endpoint when available. On installations where that endpoint is missing (MantisBT < 2.26), tags are collected by scanning all issues across all projects.
-
-This is useful for getting a complete overview of your MantisBT installation.
-The cache is valid for 24 hours by default (configurable via MANTIS_CACHE_TTL env var).
-Use this tool to refresh stale data.`,
+      title: "同步元数据缓存",
+      description: "读取全部项目及其成员、版本、分类和标签，写入本地元数据缓存。优先用 GET /tags 获取标签；接口不存在时扫描各项目的缺陷收集标签。默认缓存有效期为 3600 秒，通过 MANTIS_CACHE_TTL 配置。可用此工具强制刷新缓存。",
       inputSchema: z.object({}),
       annotations: {
         readOnlyHint: false,
@@ -226,11 +216,8 @@ Use this tool to refresh stale data.`,
   server.registerTool(
     'get_metadata',
     {
-      title: 'Get Cached Metadata',
-      description: `Return a compact summary of cached MantisBT metadata: project count, tag count, and per-project counts of users, versions, and categories.
-
-If the cache does not exist or has expired (default TTL: 24 hours), it will automatically sync first.
-Use sync_metadata to force a refresh. For full lists use: list_projects (projects), get_project_users / get_project_versions / get_project_categories (per-project data), list_tags (tags).`,
+      title: "读取元数据摘要",
+      description: "返回缓存元数据摘要：项目数、标签数及各项目的成员、版本和分类数量。缓存缺失或过期时自动同步，默认有效期为 3600 秒。强制刷新使用 sync_metadata；完整内容使用 get_metadata_full 或各项目查询工具。",
       inputSchema: z.object({}),
       annotations: {
         readOnlyHint: true,
@@ -276,11 +263,8 @@ Use sync_metadata to force a refresh. For full lists use: list_projects (project
   server.registerTool(
     'get_metadata_full',
     {
-      title: 'Get Full Cached Metadata',
-      description: `Return the complete raw MantisBT metadata cache: all projects with full fields, and per-project lists of users, versions, categories, plus all tags.
-
-If the cache does not exist or has expired (default TTL: 24 hours), it will automatically sync first.
-Use sync_metadata to force a refresh. For a lightweight overview use get_metadata instead.`,
+      title: "读取完整元数据",
+      description: "返回完整元数据缓存，包括项目、各项目成员、版本、分类和标签，以紧凑 JSON 返回。缓存缺失或过期时自动同步，默认有效期为 3600 秒。强制刷新使用 sync_metadata，简要统计使用 get_metadata。",
       inputSchema: z.object({}),
       annotations: {
         readOnlyHint: true,
@@ -308,14 +292,10 @@ Use sync_metadata to force a refresh. For a lightweight overview use get_metadat
   server.registerTool(
     'get_issue_fields',
     {
-      title: 'Get Issue Fields',
-      description: `Return all field names that are valid for the "select" parameter of list_issues and get_issue.
-
-Fields are discovered by fetching a sample issue from MantisBT (which reflects the server's active configuration — e.g. whether eta, projection, or profile fields are enabled) and merging the result with fields that MantisBT omits when empty (notes, attachments, relationships, etc.). The result is cached with the same TTL as the metadata cache.
-
-Use this tool before constructing a "select" string to ensure you only request fields that exist on this server.`,
+      title: "读取可查询字段",
+      description: "返回可用于 list_issues 和 get_issue 的 select 字段名。通过采样缺陷获取实例实际字段，并补充 notes、attachments、relationships 等为空时可能省略的字段。结果按元数据有效期缓存。此工具返回字段名，不提供项目自定义字段的编号或可选值。",
       inputSchema: z.object({
-        project_id: z.coerce.number().int().positive().optional().describe('Optional project ID to scope the sample issue fetch'),
+        project_id: z.coerce.number().int().positive().optional().describe("可选项目编号，用于限定字段采样范围"),
       }),
       annotations: {
         readOnlyHint: true,

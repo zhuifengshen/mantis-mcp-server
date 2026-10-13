@@ -8,7 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // ---------------------------------------------------------------------------
-// .env.local laden (falls vorhanden)
+// 读取本地 .env.local（如存在）
 // ---------------------------------------------------------------------------
 
 try {
@@ -23,11 +23,11 @@ try {
     }
   }
 } catch {
-  // .env.local nicht vorhanden – ENV-Vars direkt nutzen
+  // .env.local 不存在时直接使用环境变量
 }
 
 // ---------------------------------------------------------------------------
-// Config aus ENV
+// 读取环境配置
 // ---------------------------------------------------------------------------
 
 const baseUrlRaw = process.env['MANTIS_BASE_URL'];
@@ -41,7 +41,7 @@ if (!baseUrlRaw || !apiKey) {
 const baseUrl = baseUrlRaw.replace(/\/$/, '');
 
 // ---------------------------------------------------------------------------
-// Fixtures-Verzeichnis
+// 测试夹具目录
 // ---------------------------------------------------------------------------
 
 const fixturesDir = join(__dirname, '..', 'tests', 'fixtures', 'recorded');
@@ -54,13 +54,13 @@ function saveFixture(filename: string, data: unknown): void {
 }
 
 // ---------------------------------------------------------------------------
-// Client instanziieren
+// 创建客户端
 // ---------------------------------------------------------------------------
 
-const client = new MantisClient(baseUrl, apiKey, process.env['MANTIS_USE_INDEX_PHP'] === 'true');
+const client = new MantisClient(baseUrl, apiKey);
 
 // ---------------------------------------------------------------------------
-// Fixtures aufzeichnen
+// 录制测试夹具
 // ---------------------------------------------------------------------------
 
 async function recordFixtures(): Promise<void> {
@@ -72,7 +72,7 @@ async function recordFixtures(): Promise<void> {
     saveFixture('list_projects.json', projectsResult);
     if (Array.isArray(projectsResult.projects) && projectsResult.projects.length > 0) {
       firstProjectId = projectsResult.projects[0]?.id;
-      // Erstes Projekt mit nicht-leeren Versionen bevorzugen
+      // 优先选择有版本信息的项目
       projectIdWithVersions = projectsResult.projects.find(
         (p) => Array.isArray(p.versions) && p.versions.length > 0,
       )?.id ?? firstProjectId;

@@ -1,0 +1,49 @@
+name: GitHub 发布
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 已存在的版本标签，例如 v6.0.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: 核对标签与包版本
+        run: node -e 'const p=require("./package.json"); if(process.env.RELEASE_TAG !== "v"+p.version) throw new Error("标签与包版本不一致"); if(p.private || p.name !== "@youcloud/mantis-mcp-server") throw new Error("发布包元数据不符")'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:package
+      - run: npm audit --audit-level=high
+      - name: 发布经过验证的安装包
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$RELEASE_TAG" artifacts/*.tgz artifacts/*.sha256 artifacts/package-verification.json \
+            --verify-tag --title "Mantis Workflow MCP $RELEASE_TAG" \
+            --notes-file "docs/releases/$RELEASE_TAG.md"

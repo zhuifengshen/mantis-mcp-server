@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "defaults": {
+    "note_visibility": "instance_default",
+    "actions": {
+      "accept_issue": { "status_id": 40, "assigned_status_id": 50, "resolution": "preserve" },
+      "submit_fix": { "status_id": 80, "resolution_id": 20 },
+      "close_issue": { "status_id": 90, "resolution": "preserve" },
+      "reopen_issue": { "source": "project_reopen_config" },
+      "reject_issue": { "status_id": 80, "resolutions_by_reason": { "not_a_bug": 70, "wont_fix": 90, "cannot_reproduce": 40, "cannot_fix": 50 } },
+      "postpone_issue": { "status_id": 80, "resolution_id": 80 }
+    },
+    "custom_fields_by_action": {}
+  },
+  "projects": {}
+}

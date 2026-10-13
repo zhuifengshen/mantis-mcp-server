@@ -2,13 +2,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { MantisClient } from '../client.js';
 import type { MantisUser } from '../types.js';
-import { getVersionHint } from '../version-hint.js';
 
 function errorText(msg: string): string {
-  const vh = getVersionHint();
-  vh?.triggerLatestVersionFetch();
-  const hint = vh?.getUpdateHint();
-  return hint ? `Error: ${msg}\n\n${hint}` : `Error: ${msg}`;
+  return `Error: ${msg}`;
 }
 
 export function registerUserTools(server: McpServer, client: MantisClient): void {
@@ -20,8 +16,8 @@ export function registerUserTools(server: McpServer, client: MantisClient): void
   server.registerTool(
     'get_current_user',
     {
-      title: 'Get Current User',
-      description: 'Retrieve the profile of the user associated with the current API key.',
+      title: "读取当前用户",
+      description: "读取当前 API Key 对应的 Mantis 用户信息。",
       inputSchema: z.object({}),
       annotations: {
         readOnlyHint: true,

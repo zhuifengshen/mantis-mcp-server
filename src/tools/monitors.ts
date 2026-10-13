@@ -1,13 +1,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { MantisClient } from '../client.js';
-import { getVersionHint } from '../version-hint.js';
 
 function errorText(msg: string): string {
-  const vh = getVersionHint();
-  vh?.triggerLatestVersionFetch();
-  const hint = vh?.getUpdateHint();
-  return hint ? `Error: ${msg}\n\n${hint}` : `Error: ${msg}`;
+  return `Error: ${msg}`;
 }
 
 export function registerMonitorTools(server: McpServer, client: MantisClient): void {
@@ -19,17 +15,11 @@ export function registerMonitorTools(server: McpServer, client: MantisClient): v
   server.registerTool(
     'add_monitor',
     {
-      title: 'Add Issue Monitor',
-      description: `Add a user as a monitor (watcher) of a MantisBT issue. Monitors receive email notifications whenever the issue is updated. Returns a success confirmation object.
-
-Use add_monitor to subscribe team members to issue updates without assigning them as the handler. To unsubscribe a user, call remove_monitor with the same parameters.
-
-Adding a user who is already a monitor is a no-op — the operation succeeds without creating duplicates.
-
-Prerequisites: obtain issue_id from list_issues or get_issue; use find_project_member or get_project_users to look up valid MantisBT login names.`,
+      title: "添加缺陷关注人",
+      description: "将用户添加为缺陷关注人，由 Mantis 通知配置决定是否发送邮件；不会改变处理人。已关注用户再次添加不会产生重复关注。issue_id 来自 list_issues 或 get_issue；username 必须是登录名，可通过 find_project_member 或 get_project_users 查询。取消关注使用 remove_monitor。",
       inputSchema: z.object({
-        issue_id: z.coerce.number().int().positive().describe('Numeric issue ID — use list_issues or get_issue to obtain issue IDs'),
-        username: z.string().min(1).describe('MantisBT login name (not the display name) of the user to add as monitor. Use find_project_member or get_project_users to discover valid login names for a project.'),
+        issue_id: z.coerce.number().int().positive().describe("缺陷编号，使用 list_issues 或 get_issue 查询"),
+        username: z.string().min(1).describe("要添加为关注人的 Mantis 登录名，不是显示名称；使用 find_project_member 或 get_project_users 查询"),
       }),
       annotations: {
         readOnlyHint: false,
@@ -58,11 +48,11 @@ Prerequisites: obtain issue_id from list_issues or get_issue; use find_project_m
   server.registerTool(
     'remove_monitor',
     {
-      title: 'Remove Issue Monitor',
-      description: 'Remove a user from the monitor list of a MantisBT issue. The user will no longer receive email notifications for updates to this issue.',
+      title: "移除缺陷关注人",
+      description: "将用户从缺陷关注列表移除，停止该缺陷的关注订阅。",
       inputSchema: z.object({
-        issue_id: z.coerce.number().int().positive().describe('Numeric issue ID'),
-        username: z.string().min(1).describe('Username of the monitor to remove'),
+        issue_id: z.coerce.number().int().positive().describe("缺陷编号（数字）"),
+        username: z.string().min(1).describe("要取消关注的用户登录名"),
       }),
       annotations: {
         readOnlyHint: false,

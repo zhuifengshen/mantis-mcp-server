@@ -1,79 +1,29 @@
-# Contributing
+# 开发与贡献
 
-Thank you for your interest in contributing to `mantisbt-mcp-server`!
+源码与问题反馈位于 [GitHub](https://github.com/zhuifengshen/mantis-mcp-server)。请提供复现步骤、脱敏错误以及 Node.js、MantisBT 和本包版本，不要提交 API Key、真实缺陷正文或生产附件。
 
-## Prerequisites
-
-- Node.js ≥ 18
-- A MantisBT instance with a valid API token for integration testing
-
-## Setup
+## 本地开发
 
 ```bash
-git clone https://codeberg.org/dpesch/mantisbt-mcp-server
-cd mantisbt-mcp-server
-npm install
-npm run build
+git clone https://github.com/zhuifengshen/mantis-mcp-server.git
+cd mantis-mcp-server
+npm ci
+npm run typecheck
+npm test
+npm run test:package
 ```
 
-## Development
+使用 Node.js 22.12+（开发使用22.x）。`npm run build` 生成 `dist/`；`npm run init` 可安装仅执行类型检查的 pre-push 钩子。
 
-```bash
-npm run dev       # TypeScript watch mode
-npm run typecheck # Type check without emitting files
-npm run build     # Single build
-```
+## 修改约定
 
-Set the required environment variables:
+- TypeScript 保持严格模式，REST 使用原生 fetch；stdio 的 stdout 只用于 MCP 协议，日志写入 stderr。
+- 文档、工具说明和提交说明使用中文，工具名、参数名及协议字段保留英文。
+- 输入和部署绑定使用严格校验，禁止任意 fields 透传；不根据客户端角色表替代服务端授权。
+- 操作未知时保留账本并只读核查，不重发写入；增加回归用例时使用合成数据。
+- 修改调用契约时遵循语义化版本，同步 package.json、package-lock.json、CHANGELOG.md 及迁移说明。
+- 涉及真实服务的验证必须得到该实例所有者明确授权；仓库 CI 仅执行合成测试与安装包验证。
 
-```bash
-export MANTIS_BASE_URL="https://your-mantis-instance.example.com/api/rest"
-export MANTIS_API_KEY="your-api-token"
-node dist/index.js
-```
+## 发布
 
-## Pull Requests
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Commit your changes following [Conventional Commits](https://www.conventionalcommits.org/)
-4. Push and open a pull request against `main`
-
-Please describe **why** you made the change, not just what you changed.
-
-> **Note:** This repository on Codeberg is a public mirror. Pull requests are
-> reviewed and integrated via cherry-pick into the authoritative upstream — they
-> are not merged directly through Codeberg. Your contribution will be credited
-> in the commit message and CHANGELOG.
-
-## Release process
-
-Releases are published automatically by the Gitea CI pipeline when a version tag is pushed. The pipeline runs tests, builds the project, publishes to npm, and creates releases on Codeberg and GitHub.
-
-To trigger a release, bump the version in `package.json` and `server.json`, update `CHANGELOG.md`, commit, and push a tag:
-
-```bash
-git tag v1.2.3
-git push origin main --tags
-```
-
----
-
-## Reporting Issues
-
-Open an issue on [Codeberg](https://codeberg.org/dpesch/mantisbt-mcp-server/issues) with:
-- A clear description of the problem
-- Steps to reproduce
-- Expected vs. actual behavior
-- Node.js version, OS, and MantisBT version
-
-## Code Style
-
-- TypeScript strict mode
-- No external HTTP libraries (use `fetch`)
-- Keep the module structure: `src/tools/` for MCP tool registrations
-- English for code and comments; German is welcome in issues and PRs
-
-## License
-
-By contributing, you agree that your contributions will be licensed under the [MIT License](LICENSE).
+按 [发布说明](docs/releasing.md)验证精确版本和安装包后发布，GitHub tag 使用 `v<package.json.version>`。npm 包名应属于维护者有权发布的 scope；保留 MIT 许可证和原作者版权声明。

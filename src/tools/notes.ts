@@ -2,13 +2,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { MantisClient, buildNoteViewUrl } from '../client.js';
 import type { MantisNote } from '../types.js';
-import { getVersionHint } from '../version-hint.js';
 
 function errorText(msg: string): string {
-  const vh = getVersionHint();
-  vh?.triggerLatestVersionFetch();
-  const hint = vh?.getUpdateHint();
-  return hint ? `Error: ${msg}\n\n${hint}` : `Error: ${msg}`;
+  return `Error: ${msg}`;
 }
 
 // Shared with update_issue (note parameter) — posts a note and returns it enriched with view_url.
@@ -39,10 +35,10 @@ export function registerNoteTools(server: McpServer, client: MantisClient): void
   server.registerTool(
     'list_notes',
     {
-      title: 'List Issue Notes',
-      description: 'List all notes (comments) attached to a MantisBT issue. Note: get_issue already includes notes in its response — use list_notes only when you need notes without fetching the full issue.',
+      title: "列出缺陷备注",
+      description: "列出缺陷的全部备注。get_issue 默认也包含 notes；只需备注时使用本工具。",
       inputSchema: z.object({
-        issue_id: z.coerce.number().int().positive().describe('Numeric issue ID'),
+        issue_id: z.coerce.number().int().positive().describe("缺陷编号（数字）"),
       }),
       annotations: {
         readOnlyHint: true,
@@ -77,18 +73,12 @@ export function registerNoteTools(server: McpServer, client: MantisClient): void
   server.registerTool(
     'add_note',
     {
-      title: 'Add Note to Issue',
-      description: `Add a note (comment) to an existing MantisBT issue. Returns the created note object including id, created_at, reporter, text, view_state, and a view_url linking directly to the note in the MantisBT web UI.
-
-Full UTF-8 text is supported. Markdown syntax is stored as-is — rendering depends on the MantisBT instance's configured text renderer.
-
-Use view_state="private" to restrict the note to users with reporter-level access or higher; public notes are visible to all users who can view the issue.
-
-Prerequisites: obtain issue_id from list_issues, get_issue, or search_issues.`,
+      title: "添加缺陷备注",
+      description: "为已有缺陷添加备注，返回备注信息及定位备注的 view_url。支持 UTF-8，Markdown 按原文保存，显示效果取决于 Mantis 渲染配置。view_state=private 表示私有，所需访问级别以内部实例配置为准。issue_id 可通过 list_issues 或 get_issue 查询。",
       inputSchema: z.object({
-        issue_id: z.coerce.number().int().positive().describe('Numeric issue ID — use list_issues or get_issue to obtain issue IDs'),
-        text: z.string().min(1).describe('Note text (minimum 1 character). Full UTF-8 including emoji is supported. Markdown is stored as-is.'),
-        view_state: z.enum(['public', 'private']).default('public').describe('Visibility of the note: "public" (visible to all, default) or "private" (visible only to users with sufficient access level).'),
+        issue_id: z.coerce.number().int().positive().describe("缺陷编号，使用 list_issues 或 get_issue 查询"),
+        text: z.string().min(1).describe("备注正文，至少 1 个字符，支持 UTF-8 和表情；Markdown 按原文保存"),
+        view_state: z.enum(['public', 'private']).default('public').describe("备注可见性：public（公开，默认）或 private（私有，需具备对应访问权限）"),
       }),
       annotations: {
         readOnlyHint: false,
@@ -116,15 +106,11 @@ Prerequisites: obtain issue_id from list_issues, get_issue, or search_issues.`,
   server.registerTool(
     'delete_note',
     {
-      title: 'Delete Note',
-      description: `Permanently delete a note from a MantisBT issue. This action is irreversible — deleted notes cannot be recovered.
-
-Returns a plain-text confirmation message on success. Returns an error if the note does not exist or the current user lacks permission to delete it (MantisBT enforces access control: users can typically only delete their own notes unless they have manager-level access or higher).
-
-Prerequisites: obtain note_id from list_notes or from get_issue (notes[].id); obtain issue_id from the same source.`,
+      title: "删除备注",
+      description: "永久删除缺陷备注，不可恢复。成功返回确认文本，备注不存在或权限不足时返回错误；删除权限由 Mantis 控制。issue_id 和 note_id 来自 get_issue 的 notes 数组或 list_notes。",
       inputSchema: z.object({
-        issue_id: z.coerce.number().int().positive().describe('Numeric issue ID that owns the note — use get_issue or list_notes to identify this value'),
-        note_id: z.coerce.number().int().positive().describe('Numeric note ID to delete — obtain from get_issue (notes[].id) or list_notes'),
+        issue_id: z.coerce.number().int().positive().describe("备注所属的缺陷编号，使用 get_issue 或 list_notes 确认"),
+        note_id: z.coerce.number().int().positive().describe("待删除备注的编号，来自 get_issue 的 notes[].id 或 list_notes"),
       }),
       annotations: {
         readOnlyHint: false,

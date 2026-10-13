@@ -1,226 +1,44 @@
-# Usage Examples
+# Workflow MCP 场景示例
 
-Practical examples of how to interact with MantisBT through Claude once the MCP server is connected. Just ask in natural language — no tool names or parameters required. For exact tool calls and parameters, see the [Cookbook](cookbook.md).
+示例编号仅为占位。所有写入都须在用户当前授权范围内，前置标识取实时 context，operation_id 每个新动作独立生成。
 
----
+## 连续修复本人缺陷
 
-## Everyday Use Cases
+1. 将当前仓库和 Mantis 项目对齐；`list_issues({project_id:44,assignee:"me",queue:"unresolved",limit:20})`。
+2. 从本批选一个尚未处理的 ID，`get_issue_context({issue_id:123})` 确认仍归本人、未解决及项目匹配。
+3. Coding Agent 修改代码并实际自测；失败或未运行则保留未解决，可 add_note 如实记录。
+4. 自测通过后调用 `submit_fix`，带 fix_summary、passed self_test、operation_id、expected_revision。
+5. succeeded 后记录本条完成，继续本批下一个候选。partial_success/unknown 留作待处理并按原操作核查，不算完成。
+6. 本批结束需要更多候选时从第一页刷新。写入使结果集收缩，旧游标不能继续作为下一批入口；没有写入的连续扫描才沿游标续查。
 
-### Browsing and searching issues
+正常单批 N 条只需 1+2N 次 MCP 调用；这是接口组合计数，不包含 REST 请求、Agent 测试、异常恢复、长时间刷新和批末查询，也不是实测性能提升。
 
-> "Show me all open issues in the Webshop project."
+## 超过 30 分钟的修复
 
-> "What bugs are currently assigned to me?"
+读最小上下文：`get_issue_context({issue_id:123,sections:[],previous_revision:"最初标识"})`。仅 unchanged 可直接沿用原处理判断并使用新标识；changed/unavailable 先阅读最新事实。不要盲目替换标识强行登记。
 
-> "List the unresolved issues with priority 'urgent' in the Backend project."
+## 新建缺陷并上传两个附件
 
-> "What's the status of issue #1042?"
+1. 必要时读取 `get_project_context({project_id:44})` 的分类和版本。
+2. report_issue 提交明确的预期与实际现象，保存成功返回的 issue_id、expected_revision。
+3. upload_file 上传 `/本机绝对路径/截图.png`，使用新的 UUID 和上一步 revision。
+4. 成功后用最新 revision 上传 `/本机绝对路径/复现.pdf`，使用另一个 UUID。
+5. 分别报告建单与两个附件结果。第二个失败不回滚第一个，不重复 report_issue，也不把“已创建”写成“附件齐全”。
 
-> "Show me only the summary, status, and handler of issue #1042 — skip the full description and notes."
+服务不会从缺陷正文中的路径自动读取文件；`MANTIS_UPLOAD_DIR` 限定文件读取范围，不授权上传目录。
 
-> "Show me all issues reported by jsmith this month."
+## 延期及恢复
 
-> "Which issues in the Webshop project are blocking the 2.4.0 release?"
+`postpone_issue` 记录延期原因及可选目标版本、复查日期。共享映射为 80/80，进入 postponed，退出 unresolved。使用 `list_issues({project_id:44,queue:"postponed"})` 复查。
 
----
+恢复时调用 `reopen_issue({issue_id:123,reason_code:"resume_postponed",reason:"依赖已完成",expected_revision:"…",operation_id:"…"})`。无须编造复测失败；后续按实际需要受理、指派或修复。
 
-### Creating issues
+## 状态成功但备注失败
 
-> "Create a bug report: on the checkout page, clicking 'Place order' twice submits the order twice. Category: Shop, severity: major."
+保留原 submit_fix 输入和 operation_id，用 get_workflow_operation 核查。如果明确给出 retry_same_operation，纠正原拒绝原因后调用同一个 submit_fix，原输入不变，仅增加 `resume:true`。不要用 add_note 重新编写“恢复说明”，不要重复 PATCH，更不能因私有备注失败改成公开。
 
-> "Open a new issue in the API project — the token refresh endpoint returns 500 when the refresh token has expired. Assign it to the backend team."
+## 测试验收与版本管理
 
-> "Create a feature request in the Frontend project for a dark mode in the user settings. Low priority, no due date."
+默认由测试人员在 Mantis 网页验收关闭。扩展开启时才有 close_issue，仍需本人的验收记录与实际权限。不得把研发 self_test 自动转换成测试 verification。
 
-> "Create a bug in the Backend project, category API, summary 'Token refresh returns 500 on expired token', and set the custom field 'Customer' to 'ACME Corp'."
-
----
-
-### Updating issues
-
-> "Mark issue #1042 as resolved."
-
-> "Reassign issue #887 to jdoe."
-
-> "Change the severity of #1099 to 'major' and add a note: reproduced on production."
-
-> "Resolve issue #1042 as fixed and add a note in the same step: deployed to production in release 2.4.1."
-
-> "Set the custom field 'Ticket Reference' on issue #887 to 'EXT-4421'."
-
-> "Set the fix version of issues #901 and #902 to 2.4.1."
-
----
-
-### Notes and comments
-
-> "Add a comment to #1042: fix deployed to staging, awaiting QA sign-off."
-
-> "Show me all notes on issue #774."
-
-> "Add a private note to #512: customer reference AC-2291, do not disclose."
-
----
-
-### Attachments
-
-> "Attach the file /tmp/error.log to issue #1042."
-
-> "What files are attached to issue #930?"
-
----
-
-### Relationships
-
-> "Mark issue #1044 as a duplicate of #1042."
-
-> "Link #901 and #902 as related issues."
-
-> "Issue #1100 blocks #1101 — please create that relationship."
-> *(direction matters: #1100 is the blocking issue)*
-
----
-
-### Tags
-
-> "Tag issue #1042 with 'regression' and 'hotfix'."
-
-> "Remove the 'wontfix' tag from issue #887."
-
-> "Which tags are available in this MantisBT instance?"
-
----
-
-### Project metadata
-
-> "Which projects do I have access to?"
-
-> "What versions are defined in the Webshop project?"
-
-> "List all categories in the Backend project."
-
-> "Who are the members of the API project?"
-
-> "Is there a user named 'smith' in project 3?"
-
-> "Find all members of the Webshop project whose email contains '@example.com'."
-
----
-
-### Triage and reporting
-
-> "Give me an overview of all critical and urgent open issues across all projects."
-
-> "Which issues in the Backend project have been open for more than 30 days without any activity?"
-
-> "What are the most common types of bugs reported in the last six months?"
-
-> "Summarise the notes on issue #774 and suggest a next step."
-
-> "List all issues tagged 'regression' and summarise what went wrong."
-
----
-
-## Guided Prompt Workflows
-
-The server ships with prompt templates that guide Claude through structured workflows — no need to specify tool names or parameters manually. Invoke them by name from a MCP-capable client.
-
-### Creating issues from a prompt template
-
-> "Use the `create-bug-report` prompt to file the Safari login issue: project 3, category UI, summary 'Login button unresponsive on mobile Safari', description 'Tapping login on iPhone 14 / Safari 17 does nothing', steps: open login page → tap Login → nothing happens, expected: redirect to dashboard, actual: form stays open."
-
-> "Use `create-feature-request` for project 5, category UX: add a dark mode toggle to the settings page."
-
-### Summarizing and reporting
-
-> "Run the `summarize-issue` prompt for issue #1042."
-
-> "Use the `project-status` prompt for project 3 to get an overview of open issues grouped by severity."
-
----
-
-## Semantic Search
-
-Semantic search understands the *meaning* of your question — not just keywords. It finds conceptually related issues even when the exact wording differs. Enable it with `MANTIS_SEARCH_ENABLED=true`.
-
-### Duplicate detection before filing a report
-
-> "Before I create a new issue: has anyone reported a problem with the login form after a password reset?"
-
-> "Is there already a ticket about slow PDF generation for large invoices?"
-
-> "Search for issues similar to: 'user session is lost when switching browser tabs'."
-
----
-
-### Thematic overviews
-
-> "Show me relevant issues related to payment processing — across all projects."
-
-> "Show me examples of reported email delivery failures."
-
-> "Which issues mention performance problems on mobile devices?"
-
----
-
-### Keyword highlights
-
-> "Search for login errors and show me which part of each ticket is relevant."
-
-> "Find issues about the password reset flow and highlight the matching passages so I can quickly scan the results."
-
-> "Search for 'invoice export' and highlight the relevant excerpts in summary and description."
-
-For exact parameters and response shape, see the [Cookbook — Search with keyword highlights](cookbook.md#search-with-keyword-highlights).
-
----
-
-### Fuzzy / terminology-independent search
-
-> "Find issues about 'duplicate entries' — they might also be described as 'shown twice', 'double records', or 'phantom rows'."
-
-> "Search for authentication-related issues — the reports might use 'login', 'sign-in', 'token', 'session', or 'auth'."
-
----
-
-### Cross-project research
-
-> "Is the image upload bug we fixed in the Webshop also reported in the Mobile project?"
-
-> "Which projects have open issues related to GDPR or data export?"
-
----
-
-### Onboarding and knowledge transfer
-
-> "Show me tickets that explain why the authentication flow was built this way."
-
-> "Are there any known pitfalls when setting up the deployment pipeline?"
-
-> "Which issues describe problems that occur during initial environment setup?"
-
----
-
-## Resources
-
-MCP Resources are URI-addressable, read-only data that clients can fetch directly by URI — no tool invocation required. Resource support varies by client; if your client does not support Resources, use the equivalent tool instead.
-
-### Reading server state via resources
-
-> "Read `mantis://me` to see which account the MCP server is using."
-
-> "Fetch `mantis://projects` to get the list of available projects."
-
-> "Read `mantis://projects/3` to see all details of the Webshop project: members, versions, and categories in one call."
-
-> "Load `mantis://enums` to see valid severity and priority values before creating an issue."
-
-### Equivalent tool fallbacks
-
-If your client does not support Resources, ask Claude to use the corresponding tool:
-
-> "Show me my user profile." *(uses `get_current_user`)*
-
-> "Which projects are available?" *(uses `list_projects`)*
-
-> "What are the valid priority values?" *(uses `get_issue_enums`)*
+创建版本使用 create_version(project_id,name,operation_id)。读取项目 context 的 versions_revision，再用 update_version/release_version/delete_version；将其放入 expected_revision。release_version 的 next_version 使用明确名称，不自动推算版本号；第二步失败后仅按原操作恢复。

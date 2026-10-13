@@ -149,6 +149,40 @@ describe('MetadataCache – invalidate()', () => {
   });
 });
 
+describe('MetadataCache – patchVersions()', () => {
+  it('更新版本时保留原有时间戳及其他元数据', async () => {
+    const timestamp = Date.now() - (TTL + 1) * 1000;
+    const data = makeSampleMetadata();
+    data.timestamp = timestamp;
+    data.byProject[1] = { users: [{ id: 9, name: 'tester' }], versions: [{ id: 42, name: '旧版本' }], categories: [] };
+    vi.mocked(readFile).mockResolvedValue(JSON.stringify({ timestamp, data }));
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+
+    await makeCache().patchVersions((projectId, versions) => {
+      expect(projectId).toBe(1);
+      return versions.map(version => ({ ...version, name: '新版本' }));
+    });
+
+    const file = JSON.parse(vi.mocked(writeFile).mock.calls[0]![1] as string);
+    expect(file.timestamp).toBe(timestamp);
+    expect(file.data.timestamp).toBe(timestamp);
+    expect(file.data.byProject[1].versions[0].name).toBe('新版本');
+    expect(file.data.byProject[1].users).toEqual(data.byProject[1].users);
+    expect(file.data.projects).toEqual(data.projects);
+    vi.mocked(readFile).mockResolvedValue(JSON.stringify(file));
+    expect(await makeCache().loadIfValid()).toBeNull();
+  });
+
+  it.each(['missing', 'invalid'])('缓存 %s 时不创建部分元数据', async kind => {
+    if (kind === 'missing') vi.mocked(readFile).mockRejectedValue(new Error('ENOENT'));
+    else vi.mocked(readFile).mockResolvedValue('invalid JSON');
+    const mutate = vi.fn(versions => versions);
+    await makeCache().patchVersions(mutate);
+    expect(mutate).not.toHaveBeenCalled();
+    expect(writeFile).not.toHaveBeenCalled();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // loadIfValid()
 // ---------------------------------------------------------------------------

@@ -1205,6 +1205,15 @@ describe('get_issue – select', () => {
 // ---------------------------------------------------------------------------
 
 describe('create_issue – custom_fields', () => {
+  it('缺少自定义字段 value 时拒绝请求', async () => {
+    const result = await mockServer.callTool('create_issue', {
+      summary: '测试', description: '测试', project_id: 1, category: 'General',
+      custom_fields: [{ field: { id: 3 } }],
+    }, { validate: true });
+    expect(result.isError).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('sends custom_fields in the POST body', async () => {
     vi.mocked(fetch).mockResolvedValue(
       makeResponse(201, JSON.stringify({ issue: { id: 400, summary: 'CF issue' } })),
@@ -1274,6 +1283,24 @@ describe('create_issue – custom_fields', () => {
 // ---------------------------------------------------------------------------
 
 describe('update_issue – custom_fields', () => {
+  it('缺少自定义字段 value 时拒绝请求', async () => {
+    const result = await mockServer.callTool('update_issue', {
+      id: 1, fields: { custom_fields: [{ field: { id: 3 } }] },
+    }, { validate: true });
+    expect(result.isError).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([['', ''], [0, '0']])('自定义字段值 %j 保留为 %j', async (value, expected) => {
+    vi.mocked(fetch).mockResolvedValue(makeResponse(200, JSON.stringify({ issues: [{ id: 1 }] })));
+    const result = await mockServer.callTool('update_issue', {
+      id: 1, fields: { custom_fields: [{ field: { id: 3 }, value }] },
+    }, { validate: true });
+    expect(result.isError).not.toBe(true);
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0]![1]!.body as string);
+    expect(body.custom_fields[0].value).toBe(expected);
+  });
+
   it('sends custom_fields in the PATCH body', async () => {
     vi.mocked(fetch).mockResolvedValue(makeResponse(200, JSON.stringify({ issue: { id: 1 } })));
 
